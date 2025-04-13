@@ -1,0 +1,29 @@
+# Distribution / packaging artifacts (if built from server/)
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Databases (if used directly in server/)
+*.sqlite3
+*.db
+
+# Logs (if generated within server/)
+*.log
+logs/
+
+# IDE specific to Python dev in this dir
+# (keep common ones like .vscode in root) 
