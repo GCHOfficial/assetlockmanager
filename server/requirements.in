@@ -1,0 +1,16 @@
+Flask
+Flask-SQLAlchemy
+Flask-JWT-Extended
+gunicorn
+Werkzeug
+pydantic
+Flask-Limiter
+Flask-Migrate
+psycopg2-binary
+redis
+email-validator
+Flask-Cors
+APScheduler[sqlalchemy]
+python-dotenv
+Flask-Mail
+itsdangerous

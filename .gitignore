@@ -1,0 +1,89 @@
+# Environment variables
+.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python virtual environment
+.venv/
+virtualenv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Databases (if server run locally without Docker)
+*.sqlite3
+*.db
+
+# Logs
+*.log
+logs/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE / Editor files
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Cursor files
+.roo/
+.roomodes
+
+# Project Specific Ignores
+AssetLockManager/
+memory-bank/
+docs/
+
+# Generated Plans/Summaries
+api_prod_readiness_plan.md
+api_refinement_plan.md
+project_summary.md
+user_management_plan.md
+frontend_api_proxy_plan.md
+
+# UE Related Build files (if plugin built locally)
+/Binaries/
+/Intermediate/
+*.VC.db
+*.opensdf
+*.opendb
+*.sdf
+*.sln
+*.suo
+*.xcodeproj
+*.xcworkspace 

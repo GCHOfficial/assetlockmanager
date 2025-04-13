@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <style>
+      .file-fill { fill: #E0E0E0; }
+      .file-stroke { stroke: #616161; stroke-width: 2; stroke-linejoin: round; }
+      .lock-fill { fill: #BDBDBD; }
+      .lock-stroke { stroke: #424242; stroke-width: 2; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <!-- File Icon -->
+  <path class="file-fill file-stroke" d="M12 4 L12 50 L42 50 L42 16 L30 4 Z" />
+  <path class="file-fill file-stroke" d="M30 4 L30 16 L42 16" />
+
+  <!-- Padlock Icon -->
+  <path class="lock-stroke" fill="none" d="M46 38 A6 6 0 1 1 58 38 L58 42" />
+  <rect class="lock-fill lock-stroke" x="42" y="42" width="20" height="16" rx="2" />
+</svg>
