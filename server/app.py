@@ -59,7 +59,7 @@ if not database_uri:
     postgres_password = os.environ.get("POSTGRES_PASSWORD", "password")
     postgres_db = os.environ.get("POSTGRES_DB", "locks_db")
     # Default to service name 'postgres' for Docker, 'localhost' if FLASK_DEBUG=1
-    postgres_host = "localhost" if os.environ.get("FLASK_DEBUG") == "1" else "postgres"
+    postgres_host = "localhost" if os.environ.get("FLASK_DEBUG") == "1" else "alm-postgres"
     database_uri = f"postgresql://{postgres_user}:{postgres_password}@{postgres_host}:5432/{postgres_db}"
     # Use print here as logger might not be configured yet
     print(f"INFO: DATABASE_URI not provided; constructed default: {database_uri}")
@@ -67,7 +67,7 @@ if not database_uri:
 # Construct default RATELIMIT_STORAGE_URI if not provided
 if not ratelimit_storage_uri:
     # Default to service name 'redis' for Docker, 'localhost' if FLASK_DEBUG=1
-    redis_host = "localhost" if os.environ.get("FLASK_DEBUG") == "1" else "redis"
+    redis_host = "localhost" if os.environ.get("FLASK_DEBUG") == "1" else "alm-redis"
     ratelimit_storage_uri = f"redis://{redis_host}:6379/0"
     print(f"INFO: RATELIMIT_STORAGE_URI not provided; constructed default: {ratelimit_storage_uri}")
 

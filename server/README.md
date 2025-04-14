@@ -118,7 +118,7 @@ This server is designed to be run as part of the main Docker Compose setup in th
     # --- OR --- 
 
     # Build and run only the api and its direct dependencies
-    docker compose up -d --build api postgres redis
+    docker compose up -d --build alm-api alm-postgres alm-redis
     ```
 
     > **Note:** To deploy using pre-built Docker images (e.g., from GitHub Container Registry), see the **Deployment Options** section in the main [root README.md](../README.md).

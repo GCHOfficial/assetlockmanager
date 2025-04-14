@@ -56,7 +56,7 @@ For faster frontend iteration *without* rebuilding the Docker image constantly:
 
 1.  **Ensure Backend Running:** Start the necessary backend services via Docker Compose from the **root** directory:
     ```bash
-    docker compose up -d api postgres redis
+    docker compose up -d alm-api alm-postgres alm-redis
     ```
 2.  **Navigate:** `cd frontend`
 3.  **Install Dependencies:**

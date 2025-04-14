@@ -1,8 +1,8 @@
 services:
   alm-frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    # Use pre-built image defined by FRONTEND_IMAGE env var
+    image: ${FRONTEND_IMAGE}
+    # BUILD section removed for production image deployment
     container_name: lock_frontend
     networks:
       - alm
@@ -12,14 +12,14 @@ services:
       - alm-api # Ensures API is started before frontend tries to proxy requests
 
   alm-api:
-    build:
-      context: ./server
-      dockerfile: Dockerfile
+    # Use pre-built image defined by API_IMAGE env var
+    image: ${API_IMAGE}
+    # BUILD section removed for production image deployment
     container_name: lock_api
     networks:
       - alm
     env_file:
-      - .env # Load environment variables from .env file
+      - .env # Load environment variables from .env file; use stack.env for Portainer
     environment:
       # Make Flask CLI find the app
       FLASK_APP: app.py 
@@ -31,11 +31,8 @@ services:
       - alm-postgres
       - alm-redis
     volumes:
-      # Optional: Mount code for development (comment out for production build)
-      # - ./server:/app # Corrected path for server code
-      # Mount database file if using SQLite (Not needed for PostgreSQL)
-      # - ./API/locks.db:/app/locks.db # Example if using SQLite
-      - api_logs:/app/logs # Example volume for logs if app logs to /app/logs
+      # Logs volume is still useful in production
+      - api_logs:/app/logs
 
   alm-postgres:
     image: postgres:15-alpine # Using version 15 alpine image
@@ -43,7 +40,7 @@ services:
     networks:
       - alm
     env_file:
-      - .env # Load POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+      - .env # Load POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB; use stack.env for Portainer
     volumes:
       - pgdata:/var/lib/postgresql/data # Persist data
     healthcheck:
@@ -58,12 +55,12 @@ services:
     networks:
       - alm
     volumes:
-      - redisdata:/data # Persist data (optional for rate limiting, depends on needs)
+      - redisdata:/data # Persist data
 
 volumes:
   pgdata:
   redisdata:
-  api_logs: # Define the log volume if used above
+  api_logs: # Define the log volume if used above 
 
 networks:
   alm:
