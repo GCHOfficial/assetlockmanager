@@ -25,9 +25,6 @@ const DashboardPage: React.FC = () => {
   const [notifyLoading, setNotifyLoading] = useState<{[key: string]: boolean}>({}); // Loading state per lock path
   const [notifyFeedback, setNotifyFeedback] = useState<{ [key: string]: { type: 'success' | 'error', message: string } | null }>({}); // Feedback per lock path
 
-  // Add logging for render
-  console.log(`DashboardPage rendering: isLoading=${isLoading}, error=${error}, locks.length=${allLocks.length}`);
-
   useEffect(() => {
     const fetchAllLocks = async () => { // Renamed function
       if (!user) return;

@@ -1,9 +1,17 @@
 services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: lock_frontend
+    ports:
+      - "8080:80" # Map host 8080 to container 80 (Nginx)
+    depends_on:
+      - api # Ensures API is started before frontend tries to proxy requests
+
   api:
     build: ./server
     container_name: lock_api
-    ports:
-      - "5000:5000" # Map host port 5000 to container port 5000 (where gunicorn listens)
     env_file:
       - .env # Load environment variables from .env file
     environment:
@@ -18,7 +26,7 @@ services:
       - redis
     volumes:
       # Optional: Mount code for development (comment out for production build)
-      # - ./API:/app
+      # - ./server:/app # Corrected path for server code
       # Mount database file if using SQLite (Not needed for PostgreSQL)
       # - ./API/locks.db:/app/locks.db # Example if using SQLite
       - api_logs:/app/logs # Example volume for logs if app logs to /app/logs

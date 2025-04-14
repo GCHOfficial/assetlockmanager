@@ -85,6 +85,14 @@ app.config["MAIL_DEFAULT_SENDER"] = os.environ.get("MAIL_DEFAULT_SENDER", "norep
 app.config["MAIL_ENABLED"] = os.environ.get("MAIL_ENABLED", "false").lower() in ("true", "1", "t") # Load master enable switch
 app.config["MAIL_SUPPRESS_SEND"] = app.testing or os.environ.get("MAIL_SUPPRESS_SEND", "false").lower() in ("true", "1", "t") # Option to suppress sending emails
 
+# -- Frontend URL Configuration --
+app.config["FRONTEND_BASE_URL"] = os.environ.get("FRONTEND_BASE_URL")
+if not app.config["FRONTEND_BASE_URL"]:
+    # Use print/log warning if critical for features like email confirmation
+    print("WARNING: FRONTEND_BASE_URL environment variable not set. Email links might be incorrect.")
+    # Provide a default or raise an error depending on requirements
+    # For now, let it be None, but dependent features should handle this.
+
 # Configure optional JWT Expiration from environment variable
 try:
     jwt_expires_minutes_str = os.environ.get("JWT_ACCESS_TOKEN_EXPIRES_MINUTES")
@@ -973,40 +981,34 @@ def change_password_self():
     if user.check_password(validated_data.new_password):
         return jsonify({"msg": "New password cannot be the same as the old password."}), 400
 
-    # Generate token and store pending change
+    # Generate confirmation token and URL
+    # Use the constant TOKEN_PASSWORD_CONFIRM for the type/salt
+    token, expiration = generate_confirmation_token(user.id, TOKEN_PASSWORD_CONFIRM)
+    # Pass the *same constant* to generate_confirmation_url for correct path mapping
+    confirmation_url = generate_confirmation_url(token, TOKEN_PASSWORD_CONFIRM)
+
+    # Store pending hash and token details
+    user.pending_password_hash = generate_password_hash(validated_data.new_password)
+    user.confirmation_token = token
+    user.token_expiration = expiration
+    # Do NOT change user.password_hash yet
+    db.session.commit()
+
+    # Send confirmation email to the user's *current confirmed* email address
     try:
-        token, expiration = generate_confirmation_token(user.id, TOKEN_PASSWORD_CONFIRM)
-        user.pending_password_hash = generate_password_hash(validated_data.new_password)
-        user.confirmation_token = token
-        user.token_expiration = expiration
-        # Do NOT change user.password_hash yet
-        db.session.commit()
+        send_email(
+            subject="Confirm Your Password Change",
+            recipients=[user.email], # Send to current confirmed email
+            text_body=f"Hello {user.username},\n\nPlease click the following link to confirm your password change for the Asset Lock Manager: {confirmation_url}\n\nThis link will expire at {expiration.isoformat()} UTC. If you did not request this change, please ignore this email or contact an administrator.",
+            html_body=f"<p>Hello {user.username},</p><p>Please click the link below to confirm your password change for the Asset Lock Manager:</p><p><a href=\"{confirmation_url}\">{confirmation_url}</a></p><p>This link will expire at {expiration.isoformat()} UTC.</p><p>If you did not request this change, please ignore this email or contact an administrator.</p>"
+        )
+        app.logger.info(f"Sent password change confirmation link to {user.email} for user {user.username}")
+    except Exception as email_error:
+        db.session.rollback() # Rollback token/pending hash storage if email fails
+        app.logger.error(f"Failed to send password change confirmation to {user.email}: {email_error}", exc_info=True)
+        return jsonify({"msg": "Failed to send confirmation email. Please try again later."}), 500
 
-        # Send confirmation email to the user's *current confirmed* email address
-        confirm_url = generate_confirmation_url(token, 'confirm_password') # Use the name of the confirmation route
-        try:
-            send_email(
-                subject="Confirm Your Password Change",
-                recipients=[user.email], # Send to current confirmed email
-                text_body=f"Hello {user.username},\n\nPlease click the following link to confirm your password change for the Asset Lock Manager: {confirm_url}\n\nThis link will expire at {expiration.isoformat()} UTC. If you did not request this change, please ignore this email or contact an administrator.",
-                html_body=f"<p>Hello {user.username},</p><p>Please click the link below to confirm your password change for the Asset Lock Manager:</p><p><a href=\"{confirm_url}\">{confirm_url}</a></p><p>This link will expire at {expiration.isoformat()} UTC.</p><p>If you did not request this change, please ignore this email or contact an administrator.</p>"
-            )
-            app.logger.info(f"Sent password change confirmation link to {user.email} for user {user.username}")
-        except Exception as email_error:
-            db.session.rollback() # Rollback token/pending hash storage if email fails
-            app.logger.error(f"Failed to send password change confirmation to {user.email}: {email_error}", exc_info=True)
-            return jsonify({"msg": "Failed to send confirmation email. Please try again later."}), 500
-
-        return jsonify({"msg": f"Confirmation email sent to {user.email}. Please check your inbox to complete the change."}), 200
-
-    except SQLAlchemyError as e:
-        db.session.rollback()
-        app.logger.error(f"Database error initiating password change for user {current_user_username}: {e}", exc_info=True)
-        return jsonify({"msg": "Database error occurred while initiating password change."}), 500
-    except Exception as e:
-        db.session.rollback()
-        app.logger.error(f"Error initiating password change for user {current_user_username}: {e}", exc_info=True)
-        return jsonify({"msg": "An unexpected error occurred."}), 500
+    return jsonify({"msg": f"Confirmation email sent to {user.email}. Please check your inbox to complete the change."}), 200
 
 @app.route("/users/me/email", methods=["PUT", "OPTIONS"])
 @cross_origin(supports_credentials=True)
@@ -1062,13 +1064,13 @@ def change_email_self():
         db.session.commit()
 
         # Send confirmation email to the *new* address
-        confirm_url = generate_confirmation_url(token, 'confirm_email') # Use the name of the confirmation route
+        confirmation_url = generate_confirmation_url(token, TOKEN_EMAIL_CONFIRM)
         try:
             send_email(
                 subject="Confirm Your Email Address Change",
                 recipients=[new_email], # Send to the new email
-                text_body=f"Hello {user.username},\n\nPlease click the following link to confirm your email address change for the Asset Lock Manager: {confirm_url}\n\nThis link will expire at {expiration.isoformat()} UTC.",
-                html_body=f"<p>Hello {user.username},</p><p>Please click the link below to confirm your email address change for the Asset Lock Manager:</p><p><a href=\"{confirm_url}\">{confirm_url}</a></p><p>This link will expire at {expiration.isoformat()} UTC.</p>"
+                text_body=f"Hello {user.username},\n\nPlease click the following link to confirm your email address change for the Asset Lock Manager: {confirmation_url}\n\nThis link will expire at {expiration.isoformat()} UTC.",
+                html_body=f"<p>Hello {user.username},</p><p>Please click the link below to confirm your email address change for the Asset Lock Manager:</p><p><a href=\"{confirmation_url}\">{confirmation_url}</a></p><p>This link will expire at {expiration.isoformat()} UTC.</p>"
             )
             app.logger.info(f"Sent email change confirmation link to {new_email} for user {user.username}")
         except Exception as email_error:

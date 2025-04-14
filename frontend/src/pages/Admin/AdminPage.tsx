@@ -1,6 +1,8 @@
 import React from 'react';
-import { Routes, Route, Link as RouterLink, useLocation, useNavigate } from 'react-router-dom';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+// import { Routes, Route, Link as RouterLink, useLocation, useNavigate } from 'react-router-dom';
+import { Routes, Route, useLocation, useNavigate } from 'react-router-dom'; // Removed RouterLink
+// import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"; // Removed TabsContent
 import AdminUserManagementPage from './AdminUserManagementPage'; // To be created
 import AdminConfigurationPage from './AdminConfigurationPage'; // To be created
 

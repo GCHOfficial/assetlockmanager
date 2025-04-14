@@ -18,16 +18,19 @@ The client determines the backend API URL using the following priority:
 
 1.  **`--backend <URL>` Command-line Argument:** Overrides all other settings.
     ```bash
-    python asset_lock_manager.py --backend http://my-lock-server.local:5000 list
+    # Example using the default Docker setup
+    python asset_lock_manager.py --backend http://localhost:8080/api list
     ```
 2.  **`ASSET_LOCK_BACKEND_URL` Environment Variable:** Set this variable in your shell.
     ```bash
-    export ASSET_LOCK_BACKEND_URL="http://my-lock-server.local:5000"
+    # Example using the default Docker setup
+    export ASSET_LOCK_BACKEND_URL="http://localhost:8080/api"
     python asset_lock_manager.py list
     ```
 3.  **Repository Configuration File (`.git/asset_lock_config.json`):** Set the URL specifically for this repository clone using the `configure` command:
     ```bash
-    python asset_lock_manager.py configure --backend http://my-lock-server.local:5000
+    # Example using the default Docker setup
+    python asset_lock_manager.py configure --backend http://localhost:8080/api
     ```
     This creates/updates `.git/asset_lock_config.json` with the URL. This file is ignored by Git.
 

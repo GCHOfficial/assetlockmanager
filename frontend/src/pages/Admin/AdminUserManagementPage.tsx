@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import * as api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,9 @@ import {
 } from "@/components/ui/table";
 import { 
     Dialog, DialogContent, DialogDescription, DialogFooter, 
-    DialogHeader, DialogTitle, DialogTrigger 
+    DialogHeader, DialogTitle, 
+    DialogPortal,
+    DialogOverlay,
 } from "@/components/ui/dialog";
 import { 
     Tooltip, TooltipContent, TooltipProvider, TooltipTrigger 
@@ -35,6 +37,7 @@ const AdminUserManagementPage: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState(''); // State for search term
 
   // Dialog State
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -52,7 +55,9 @@ const AdminUserManagementPage: React.FC = () => {
     setError(null);
     try {
       const data = await api.adminListUsers();
-      setUsers(data);
+      // Sort users by ID ascendingly before setting state
+      const sortedData = data.sort((a, b) => a.id - b.id);
+      setUsers(sortedData);
     } catch (err) {
       console.error("Failed to fetch users:", err);
       setError("Failed to load users.");
@@ -183,6 +188,17 @@ const AdminUserManagementPage: React.FC = () => {
     }
   };
 
+  // Filtered Users based on search term
+  const filteredUsers = useMemo(() => {
+    if (!searchTerm) {
+      return users; // Return all users if no search term
+    }
+    return users.filter(user =>
+      user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      user.email.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [users, searchTerm]);
+
   // --- Render ---
   if (isLoading) {
     return <div className="flex justify-center my-3"><Loader2 className="h-8 w-8 animate-spin" /></div>;
@@ -192,7 +208,7 @@ const AdminUserManagementPage: React.FC = () => {
     <TooltipProvider>
       <Card>
         <CardHeader>
-          <div className="flex justify-between items-center">
+          <div className="flex justify-between items-center mb-4"> {/* Added margin-bottom */} 
             <CardTitle>Users</CardTitle>
             <div className="flex items-center space-x-2">
               <Tooltip>
@@ -207,6 +223,16 @@ const AdminUserManagementPage: React.FC = () => {
                 <Plus className="mr-2 h-4 w-4" /> Add User
               </Button>
             </div>
+          </div>
+          {/* Search Input */}
+          <div className="w-full max-w-sm">
+             <Input 
+               type="text"
+               placeholder="Search by username or email..."
+               value={searchTerm}
+               onChange={(e) => setSearchTerm(e.target.value)}
+               className="mb-4" // Add margin below search
+             />
           </div>
         </CardHeader>
         <CardContent>
@@ -229,7 +255,7 @@ const AdminUserManagementPage: React.FC = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users.map((user) => (
+              {filteredUsers.map((user) => (
                 <TableRow key={user.id}>
                   <TableCell className="font-medium">{user.id}</TableCell>
                   <TableCell>{user.username}</TableCell>
@@ -271,95 +297,103 @@ const AdminUserManagementPage: React.FC = () => {
       {/* --- Dialogs --- */} 
 
       {/* Create/Edit User Dialog */} 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}> 
-        <DialogContent className="sm:max-w-[425px]" onInteractOutside={handleDialogClose} onEscapeKeyDown={handleDialogClose}>
-          <DialogHeader>
-            <DialogTitle>{dialogMode === 'create' ? 'Create New User' : 'Edit User'}</DialogTitle>
-            {/* <DialogDescription>Make changes to the user here.</DialogDescription> */} 
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            {dialogError && (
-                <Alert variant="destructive" className="mb-4">
-                <Terminal className="h-4 w-4" />
-                <AlertTitle>Error</AlertTitle>
-                <AlertDescription>{dialogError}</AlertDescription>
-                </Alert>
-            )}
-            {/* Refactor form layout: Use vertical stacking */}
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="username">Username</Label>
-                <Input 
-                  id="username" 
-                  name="username" 
-                  value={formData.username} 
-                  onChange={handleFormChange}
-                  disabled={dialogLoading || dialogMode === 'edit'}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input 
-                  id="email" 
-                  name="email" 
-                  type="email" 
-                  value={formData.email} 
-                  onChange={handleFormChange}
-                  disabled={dialogLoading}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">
-                  {dialogMode === 'create' ? 'Password' : 'New Password (Optional)'}
-                </Label>
-                <Input 
-                  id="password" 
-                  name="password" 
-                  type="password" 
-                  value={formData.password} 
-                  onChange={handleFormChange}
-                  placeholder={dialogMode === 'create' ? 'Required' : 'Leave blank to keep current'}
-                  disabled={dialogLoading}
-                />
-              </div>
-               <div className="flex items-center space-x-2 pt-2"> {/* Keep flex, add top padding */} 
-                  <Switch 
-                      id="isAdmin" 
-                      checked={formData.isAdmin} 
-                      onCheckedChange={handleAdminSwitchChange} 
-                      disabled={dialogLoading || selectedUser?.id === currentUser?.id}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogPortal>
+          <DialogOverlay />
+          <DialogContent className="sm:max-w-[425px]" onInteractOutside={handleDialogClose} onEscapeKeyDown={handleDialogClose}>
+            <DialogHeader>
+              <DialogTitle>{dialogMode === 'create' ? 'Create New User' : 'Edit User'}</DialogTitle>
+              <DialogDescription>
+                {dialogMode === 'create' ? 'Fill in the details for the new user.' : `Editing user: ${selectedUser?.username}`}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              {dialogError && (
+                  <Alert variant="destructive" className="mb-4">
+                  <Terminal className="h-4 w-4" />
+                  <AlertTitle>Error</AlertTitle>
+                  <AlertDescription>{dialogError}</AlertDescription>
+                  </Alert>
+              )}
+              {/* Refactor form layout: Use vertical stacking */}
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="username">Username</Label>
+                  <Input 
+                    id="username" 
+                    name="username" 
+                    value={formData.username} 
+                    onChange={handleFormChange}
+                    disabled={dialogLoading || dialogMode === 'edit'}
                   />
-                  <Label htmlFor="isAdmin" >Administrator Status</Label>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input 
+                    id="email" 
+                    name="email" 
+                    type="email" 
+                    value={formData.email} 
+                    onChange={handleFormChange}
+                    disabled={dialogLoading}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">
+                    {dialogMode === 'create' ? 'Password' : 'New Password (Optional)'}
+                  </Label>
+                  <Input 
+                    id="password" 
+                    name="password" 
+                    type="password" 
+                    value={formData.password} 
+                    onChange={handleFormChange}
+                    placeholder={dialogMode === 'create' ? 'Required' : 'Leave blank to keep current'}
+                    disabled={dialogLoading}
+                  />
+                </div>
+                 <div className="flex items-center space-x-2 pt-2"> {/* Keep flex, add top padding */} 
+                    <Switch 
+                        id="isAdmin" 
+                        checked={formData.isAdmin} 
+                        onCheckedChange={handleAdminSwitchChange} 
+                        disabled={dialogLoading || selectedUser?.id === currentUser?.id}
+                    />
+                    <Label htmlFor="isAdmin" >Administrator Status</Label>
+                </div>
               </div>
             </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={handleDialogClose} disabled={dialogLoading}>Cancel</Button>
-            <Button onClick={handleDialogSubmit} disabled={dialogLoading}>
-               {dialogLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-               {dialogLoading ? (dialogMode === 'create' ? 'Creating...' : 'Saving...') : (dialogMode === 'create' ? 'Create User' : 'Save Changes')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+            <DialogFooter>
+              <Button variant="outline" onClick={handleDialogClose} disabled={dialogLoading}>Cancel</Button>
+              <Button onClick={handleDialogSubmit} disabled={dialogLoading}>
+                 {dialogLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                 {dialogLoading ? (dialogMode === 'create' ? 'Creating...' : 'Saving...') : (dialogMode === 'create' ? 'Create User' : 'Save Changes')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </DialogPortal>
       </Dialog>
 
        {/* Delete Confirmation Dialog */} 
        <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-        <DialogContent onInteractOutside={closeDeleteConfirm} onEscapeKeyDown={closeDeleteConfirm}>
-          <DialogHeader>
-            <DialogTitle>Confirm Deletion</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete user {userToDelete?.username} (ID: {userToDelete?.id})? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-             <Button variant="outline" onClick={closeDeleteConfirm} disabled={deleteLoading}>Cancel</Button>
-             <Button variant="destructive" onClick={confirmDeleteUser} disabled={deleteLoading}>
-                {deleteLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                {deleteLoading ? 'Deleting...' : 'Delete User'}
-             </Button>
-          </DialogFooter>
-        </DialogContent>
+        <DialogPortal>
+          <DialogOverlay />
+          <DialogContent onInteractOutside={closeDeleteConfirm} onEscapeKeyDown={closeDeleteConfirm}>
+            <DialogHeader>
+              <DialogTitle>Confirm Deletion</DialogTitle>
+              <DialogDescription>
+                Are you sure you want to delete user {userToDelete?.username} (ID: {userToDelete?.id})? This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+               <Button variant="outline" onClick={closeDeleteConfirm} disabled={deleteLoading}>Cancel</Button>
+               <Button variant="destructive" onClick={confirmDeleteUser} disabled={deleteLoading}>
+                  {deleteLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  {deleteLoading ? 'Deleting...' : 'Delete User'}
+               </Button>
+            </DialogFooter>
+          </DialogContent>
+        </DialogPortal>
       </Dialog>
 
     </TooltipProvider>

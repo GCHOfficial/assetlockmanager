@@ -2,7 +2,10 @@ import axios from 'axios';
 
 // Determine the API base URL from environment variables
 // Fallback to localhost for development if not set
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+// const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+
+// Use relative path for API calls to go through the Nginx proxy
+const API_BASE_URL = '/api';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,

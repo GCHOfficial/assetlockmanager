@@ -1,54 +1,57 @@
-# React + TypeScript + Vite
+# Asset Lock Manager - Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This directory contains the React/TypeScript frontend application for the Asset Lock Manager.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+*   User Login/Logout
+*   Dashboard displaying locks held by the current user and others.
+*   Ability to release locks held by the current user.
+*   Ability to send a notification ("poke") to the holder of a lock.
+*   User Settings page for changing password and email address (requires email confirmation).
+*   Admin Panel:
+    *   User Management: List, search, create, edit (email, password, admin status), delete users.
+    *   Configuration Management: View and update system settings (JWT Expiry, Auto Lock Release, SMTP server details).
+*   Uses Shadcn UI components and Tailwind CSS for styling.
+*   Communicates with the backend API (proxied via Nginx).
 
-## Expanding the ESLint configuration
+## Tech Stack
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+*   React
+*   TypeScript
+*   Vite
+*   react-router-dom
+*   Axios
+*   Shadcn UI / Radix UI / Tailwind CSS
+*   Lucide Icons
 
-```js
-export default tseslint.config({
-  extends: [
-    // Remove ...tseslint.configs.recommended and replace with this
-    ...tseslint.configs.recommendedTypeChecked,
-    // Alternatively, use this for stricter rules
-    ...tseslint.configs.strictTypeChecked,
-    // Optionally, add this for stylistic rules
-    ...tseslint.configs.stylisticTypeChecked,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
-```
+## Running the Frontend
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+This frontend is designed to be run as part of the main Docker Compose setup in the root directory.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+1.  Ensure Docker and Docker Compose are installed.
+2.  Configure the root `.env` file (copy from `.env.example`) with your backend settings (`JWT_SECRET_KEY`, `POSTGRES_PASSWORD`, `MAIL_*` variables, `FRONTEND_BASE_URL`).
+3.  From the **root directory** of the repository, run:
+    ```bash
+    docker compose build
+    docker compose up -d
+    ```
+4.  Access the frontend in your browser at `http://localhost:8080` (or the host port mapped in `docker-compose.yml`).
 
-export default tseslint.config({
-  plugins: {
-    // Add the react-x and react-dom plugins
-    'react-x': reactX,
-    'react-dom': reactDom,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended typescript rules
-    ...reactX.configs['recommended-typescript'].rules,
-    ...reactDom.configs.recommended.rules,
-  },
-})
-```
+### Standalone Development (Optional - Requires Backend Running Separately)
+
+If you need to run the frontend development server directly (e.g., for faster hot-reloading during focused frontend work), you can:
+
+1.  Ensure the backend API (including DB and Redis) is running (e.g., via `docker compose up -d api postgres redis` from the root).
+2.  Navigate to this `frontend` directory.
+3.  Install dependencies: `pnpm install` (requires pnpm: `npm install -g pnpm`).
+4.  Set the API base URL environment variable (since the Nginx proxy won't be used):
+    ```bash
+    export VITE_API_BASE_URL=http://localhost:5000 
+    # Or use a .env file in the frontend directory with VITE_API_BASE_URL=http://localhost:5000
+    ```
+5.  Run the development server:
+    ```bash
+    pnpm dev
+    ```
+    *(Note: This requires temporarily uncommenting the `VITE_API_BASE_URL` logic in `src/services/api.ts` and commenting out the `/api` relative path.)*

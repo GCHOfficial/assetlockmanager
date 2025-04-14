@@ -10,6 +10,8 @@ import MainLayout from './layouts/MainLayout';
 import DashboardPage from './pages/Dashboard/DashboardPage'; // Import the actual DashboardPage
 import SettingsPage from './pages/Settings/SettingsPage'; // Import SettingsPage
 import AdminPage from './pages/Admin/AdminPage'; // Import AdminPage
+import ConfirmEmailPage from './pages/ConfirmEmailPage'; // Import Confirmation Page
+import ConfirmPasswordPage from './pages/ConfirmPasswordPage'; // Import Confirmation Page
 import { useAuth } from './context/AuthContext'; // Import useAuth
 import { Loader2 } from "lucide-react"; // Use lucide icon for loading indicator
 import { ThemeProvider } from "./components/theme-provider"; // Import the ThemeProvider
@@ -63,44 +65,45 @@ const AdminRoute = ({ children }: { children: React.ReactNode }) => {
 };
 
 function App() {
-  const { isAuthenticated, isLoading } = useAuth(); // Use the hook here as well for the /login route logic
-
-  // Optional: Central loading state removed as it's handled by individual route components
+  // Remove unused auth state checks from here
+  // const { isAuthenticated, isLoading } = useAuth(); 
 
   return (
     <Router>
       <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
         <Routes>
-          {/* If loading, show nothing or loader for login route, otherwise check auth */}
-          <Route 
-            path="/login" 
-            element={isLoading ? (
-              <div className="flex justify-center items-center min-h-screen">
-                <Loader2 className="h-16 w-16 animate-spin" />
-              </div>
-            ) : isAuthenticated ? <Navigate to="/" replace /> : <LoginPage />} 
-          />
-          <Route 
-            path="/*" 
-            element={ // ProtectedRoute will show loader if isLoading
+          {/* Public Routes - No auth check needed here */}
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/confirm-email" element={<ConfirmEmailPage />} />
+          <Route path="/confirm-password" element={<ConfirmPasswordPage />} />
+
+          {/* Protected Routes Wrapped in MainLayout */}
+          <Route
+            path="/" // Matches root and any nested paths not caught by public routes
+            element={
               <ProtectedRoute>
                 <MainLayout />
               </ProtectedRoute>
             }
           >
-            {/* Nested routes within MainLayout will be protected by ProtectedRoute */}
-            <Route index element={<DashboardPage />} /> {/* Default route */}
-            <Route path="settings" element={<SettingsPage />} /> {/* Settings route */}
-            {/* Admin Routes */}
-            <Route 
-              path="admin/*" // Use trailing wildcard for nested admin routes
-              element={ // AdminRoute will show loader if isLoading
+            {/* Routes rendered inside MainLayout's Outlet */}
+            <Route index element={<DashboardPage />} /> {/* Default route at "/" */}
+            <Route path="settings" element={<SettingsPage />} />
+            <Route
+              path="admin/*"
+              element={ // AdminRoute adds an additional layer of protection
                 <AdminRoute>
                   <AdminPage />
                 </AdminRoute>
               }
             />
+            {/* Add a catch-all for any other paths inside MainLayout? Optional. */}
+            {/* <Route path="*" element={<Navigate to="/" replace />} /> */}
           </Route>
+
+          {/* Optional: Add a top-level catch-all for truly unmatched routes */}
+          {/* <Route path="*" element={<Navigate to="/login" replace />} /> */}
+
         </Routes>
       </ThemeProvider>
     </Router>
