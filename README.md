@@ -73,7 +73,33 @@ Client-Server architecture. The Flask API (`server/`) serves as the central serv
 
 ## ⚙️ Configuration Details
 
-See `.env.example` for detailed explanations of all environment variables.
+Configuration is primarily handled via environment variables loaded from a `.env` file in the project root when using Docker Compose.
+
+Key settings include:
+
+*   `DATABASE_URI`: Connection string for PostgreSQL.
+*   `JWT_SECRET_KEY`: Secret key for signing JWTs.
+*   `MAIL_*` variables: Settings for the email server (host, port, user, password, TLS/SSL, sender address).
+*   `MAIL_ENABLED`: Master switch (`true`/`false`) to enable/disable all email functionality.
+*   `AUTO_RELEASE_ENABLED`: Default (`true`/`false`) for enabling automatic lock release.
+*   `AUTO_RELEASE_HOURS`: Default hours after which inactive locks are released.
+*   `JWT_ACCESS_TOKEN_EXPIRES_MINUTES`: Default token expiry time in minutes (0 for no expiry).
+*   `INITIAL_ADMIN_*`: Optional variables to create an initial admin user on first startup.
+*   `FRONTEND_BASE_URL`: Base URL for the frontend (used for generating email confirmation links).
+*   `RATELIMIT_STORAGE_URI`: Redis connection string for rate limiting.
+
+**Admin UI Overrides:**
+Certain configuration settings can be modified by administrators via the web UI (`Admin -> Configuration`). These settings are stored in the database and **override** the default values provided by the corresponding environment variables at runtime:
+*   JWT Expiry Enable/Disable
+*   JWT Expiry Minutes
+*   Auto Lock Release Enable/Disable
+*   Auto Lock Release Hours
+*   Mail Enabled (Overrides `MAIL_ENABLED` default for generating confirmation emails, but the master `MAIL_ENABLED` env var still controls actual sending)
+
+**Startup Email Test:**
+If `MAIL_ENABLED` is `true` in the environment, the system attempts to send a test email to the first admin user on startup. The result (`SUCCESS`, `FAILED`, `SKIPPED`) is visible in the Admin Configuration UI.
+
+See `.env.example` for a full list and descriptions.
 
 --- 
 

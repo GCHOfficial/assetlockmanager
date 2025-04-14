@@ -30,7 +30,7 @@ const AdminPage: React.FC = () => {
   };
 
   return (
-    <div className="w-full space-y-4 p-6 max-w-6xl mx-auto">
+    <div className="mt-2 space-y-6 p-6 max-w-5xl mx-auto">
       <h1 className="text-3xl font-bold mt-2">Admin Panel</h1>
       <Tabs value={currentTabValue} onValueChange={onTabChange} className="w-full">
         <TabsList className="grid w-full grid-cols-2">

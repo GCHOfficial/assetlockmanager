@@ -4,7 +4,7 @@ import * as api from '../../services/api';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Loader2, Terminal } from "lucide-react";
 
@@ -158,11 +158,8 @@ const SettingsPage: React.FC = () => {
         {/* Change Email Card */}
         <Card>
            <form onSubmit={handleEmailChange}>
-            <CardHeader className="mb-4">
+            <CardHeader>
               <CardTitle className="text-2xl mb-6">Change Email</CardTitle>
-              <CardDescription>
-                  Current Email: {user?.email}
-              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {emailError && (
@@ -179,6 +176,17 @@ const SettingsPage: React.FC = () => {
                     <AlertDescription>{emailSuccess}</AlertDescription>
                   </Alert>
               )}
+              <div className="space-y-2">
+                <Label htmlFor="currentEmail">Current Email Address</Label>
+                <Input
+                  id="currentEmail"
+                  name="currentEmail"
+                  type="email"
+                  value={user?.email || ''}
+                  readOnly
+                  className="bg-muted cursor-default"
+                />
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="newEmail">New Email Address</Label>
                 <Input

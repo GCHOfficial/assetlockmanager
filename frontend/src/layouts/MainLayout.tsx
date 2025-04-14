@@ -16,7 +16,7 @@ const MainLayout: React.FC = () => {
   return (
     <div className="flex flex-col min-h-screen">
       {/* Header/Navigation Bar */}
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <header className="sticky top-0 z-50 w-full bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <nav className="flex h-14 items-center px-4 sm:px-6 lg:px-8">
           <div className="mr-4 flex items-center">
             <RouterLink to="/" className="mr-6 flex items-center space-x-2">

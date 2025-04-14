@@ -92,9 +92,20 @@ def run_migrations_online():
                 directives[:] = []
                 logger.info('No changes in schema detected.')
 
+    # Helper function to tell autogenerate to ignore the apscheduler_jobs table
+    def include_object_for_autogen(object, name, type_, reflected, compare_to):
+        if type_ == "table" and name == "apscheduler_jobs":
+            logger.info(f"Ignoring table {name} for autogenerate")
+            return False
+        # Default behavior for other objects
+        return True
+
     conf_args = current_app.extensions['migrate'].configure_args
     if conf_args.get("process_revision_directives") is None:
         conf_args["process_revision_directives"] = process_revision_directives
+    
+    # Add the include_object hook to the arguments
+    conf_args["include_object"] = include_object_for_autogen
 
     connectable = get_engine()
 
@@ -102,7 +113,7 @@ def run_migrations_online():
         context.configure(
             connection=connection,
             target_metadata=get_metadata(),
-            **conf_args
+            **conf_args # Pass the modified args here
         )
 
         with context.begin_transaction():

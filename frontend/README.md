@@ -75,3 +75,20 @@ For faster frontend iteration *without* rebuilding the Docker image constantly:
     ```
 7.  **Access:** Open the local URL provided by the `pnpm dev` output (usually `http://localhost:5173` or similar).
 8.  **IMPORTANT:** Remember to **revert the changes** in `src/services/api.ts` before committing or building the production Docker image.
+
+## Configuration
+
+The frontend itself requires minimal configuration. It connects to the backend API via a relative path (`/api`) which is proxied by the Nginx server running in the same container (see `nginx.conf` and `Dockerfile`).
+
+The crucial backend configuration affecting the frontend (like the `FRONTEND_BASE_URL` needed for email links) is managed via the **server's** environment variables (`.env` file in the project root).
+
+### Admin Panel
+
+The Admin Configuration page allows administrators to view and modify certain backend settings:
+
+*   **JWT Expiry:** Enable/disable token expiry and set the duration (minutes).
+*   **Auto Lock Release:** Enable/disable the automatic release of old locks and set the age threshold (hours).
+*   **Mail Enabled:** Enable/disable the generation of confirmation emails for password/email changes.
+*   **Mail Status:** View the master email system status (from `MAIL_ENABLED` env var) and the result of the last startup email test.
+
+Settings modified here are saved to the backend database and override the default values set by the backend's environment variables.

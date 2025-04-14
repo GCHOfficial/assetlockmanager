@@ -33,16 +33,52 @@ The server acts as the central authority for managing file/asset locks, especial
 
 ## ⚙️ Configuration
 
-The server is primarily configured via environment variables loaded from the `.env` file in the **repository root directory**. Key variables include:
+The API server relies heavily on environment variables for configuration, especially when run via Docker Compose. These are typically loaded from a `.env` file in the project root.
 
-*   `DATABASE_URI` (or `POSTGRES_*` vars)
-*   `JWT_SECRET_KEY`
-*   `RATELIMIT_STORAGE_URI`
-*   `MAIL_*` variables (for email notifications)
-*   `FRONTEND_BASE_URL` (for generating confirmation links)
-*   `INITIAL_ADMIN_*` (optional, for first startup)
+Key environment variables:
 
-See the root `.env.example` file for a full list and descriptions.
+*   `DATABASE_URI`: Connection string (automatically constructed in `docker-compose.yml` from `POSTGRES_*` vars).
+*   `JWT_SECRET_KEY`: **Required** for signing JWTs.
+*   `MAIL_SERVER`, `MAIL_PORT`, `MAIL_USE_TLS`, `MAIL_USE_SSL`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_DEFAULT_SENDER`: **Required** if `MAIL_ENABLED` is true. These configure the SMTP server connection.
+*   `MAIL_ENABLED`: Master switch (`true`/`false`) to enable/disable all email functionality.
+*   `AUTO_RELEASE_ENABLED`: Default (`true`/`false`) for enabling automatic lock release.
+*   `AUTO_RELEASE_HOURS`: Default hours (e.g., `72`) after which inactive locks are released.
+*   `JWT_ACCESS_TOKEN_EXPIRES_MINUTES`: Default token expiry time in minutes (e.g., `60`). Use `0` or omit for no expiry.
+*   `INITIAL_ADMIN_USER`, `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_PASSWORD`: Optional. If set, an admin user with these credentials will be created on first startup if they don't already exist.
+*   `FRONTEND_BASE_URL`: **Required** for generating correct email confirmation links. Should be the public URL of your frontend.
+*   `RATELIMIT_STORAGE_URI`: **Required** Redis connection string (e.g., `redis://redis:6379/0`) for rate limiting.
+
+### Database Overrides
+
+While environment variables provide defaults and essential connection details, certain settings can be configured via the Admin UI. These are stored in the `configuration` database table and override the corresponding environment variable defaults at runtime:
+
+*   `jwt.expiry.enabled` (boolean)
+*   `jwt.expiry.minutes` (integer)
+*   `auto_release.enabled` (boolean)
+*   `auto_release.hours` (integer)
+*   `mail.enabled` (boolean) - Note: This overrides the default for *generating* confirmation emails. The master `MAIL_ENABLED` env var still controls whether the mail system attempts to *send* anything.
+
+### Startup Email Test
+
+If the `MAIL_ENABLED` environment variable is set to `true`, the `entrypoint.sh` script will automatically trigger the `flask test-email` command on startup. This sends a test email to the first admin user found and records the result (`SUCCESS`, `FAILED`, or `SKIPPED`) in the database under the key `system.startup.mail_test_status`.
+
+## API Endpoints
+
+See OpenAPI documentation (TODO: Add link/generation instructions) for detailed endpoint specifications.
+
+## Background Jobs
+
+*   **`delete_old_locks`**: Runs periodically (default: hourly) via APScheduler. Checks the effective `auto_release.enabled` and `auto_release.hours` configuration (DB->Env fallback) and deletes locks older than the threshold.
+
+## CLI Commands
+
+Additional Flask CLI commands are available:
+
+*   `flask db migrate`: Generate database migration scripts.
+*   `flask db upgrade`: Apply database migrations.
+*   `flask create-admin`: Creates the initial admin user (used by `entrypoint.sh`).
+*   `flask test-email`: Sends a test email to the first admin user.
+*   `flask set-config <key> <value>`: Sets a key-value pair in the `configuration` table.
 
 --- 
 

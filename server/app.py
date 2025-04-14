@@ -5,7 +5,7 @@ import atexit
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore # Import SQLAlchemyJobStore
 
-from flask import Flask, request, jsonify, url_for # Add url_for
+from flask import Flask, request, jsonify, url_for, current_app, has_app_context # Add has_app_context import
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate # Import Migrate
 from sqlalchemy.exc import SQLAlchemyError # Import SQLAlchemyError
@@ -34,6 +34,9 @@ from utils.token import (
     TOKEN_EMAIL_CONFIRM,
     TOKEN_PASSWORD_CONFIRM
 )
+
+# Import click for CLI commands
+import click
 
 # ----------------------------
 # Application Configuration
@@ -74,9 +77,18 @@ app.config["SECRET_KEY"] = jwt_secret_key # Also set the standard Flask SECRET_K
 app.config["SQLALCHEMY_DATABASE_URI"] = database_uri
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# -- Mail Configuration --
-app.config["MAIL_SERVER"] = os.environ.get("MAIL_SERVER", "localhost")
-app.config["MAIL_PORT"] = int(os.environ.get("MAIL_PORT", "25"))
+# -- Auto Lock Release Configuration --
+# Load from environment variables, providing defaults if not set
+app.config["AUTO_RELEASE_ENABLED"] = os.environ.get("AUTO_RELEASE_ENABLED", "false").lower() in ("true", "1", "t")
+app.config["AUTO_RELEASE_HOURS"] = int(os.environ.get("AUTO_RELEASE_HOURS", "72")) # Default 72 hours
+# Basic validation for hours
+if app.config["AUTO_RELEASE_HOURS"] < 1:
+    app.logger.warning("AUTO_RELEASE_HOURS is set to less than 1, defaulting to 1 hour.")
+    app.config["AUTO_RELEASE_HOURS"] = 1
+
+# -- Email Configuration --
+app.config["MAIL_SERVER"] = os.environ.get("MAIL_SERVER")
+app.config["MAIL_PORT"] = int(os.environ.get("MAIL_PORT", 587))
 app.config["MAIL_USE_TLS"] = os.environ.get("MAIL_USE_TLS", "false").lower() in ("true", "1", "t")
 app.config["MAIL_USE_SSL"] = os.environ.get("MAIL_USE_SSL", "false").lower() in ("true", "1", "t")
 app.config["MAIL_USERNAME"] = os.environ.get("MAIL_USERNAME")
@@ -143,44 +155,36 @@ jobstores = {
 scheduler = BackgroundScheduler(jobstores=jobstores, daemon=True)
 
 def delete_old_locks():
-    """Scheduled job to delete locks older than configured duration."""
-    # Ensure this runs within an application context to access db, config, logger
+    """Background job to delete locks older than the configured threshold."""
     with app.app_context():
-        app.logger.info("Running scheduled job: delete_old_locks")
+        # Use effective value for auto release enabled check
+        auto_release_enabled = get_effective_config_value(CONFIG_AUTO_RELEASE_ENABLED, "AUTO_RELEASE_ENABLED", bool, False)
+        
+        if not auto_release_enabled:
+            app.logger.info("Auto-release disabled via config. Skipping delete_old_locks job.")
+            return
+
+        # Use effective value for hours
+        hours_threshold = get_effective_config_value(CONFIG_AUTO_RELEASE_HOURS, "AUTO_RELEASE_HOURS", int, 72)
+        if hours_threshold < 1:
+            app.logger.warning(f"Effective auto-release hours ({hours_threshold}) is less than 1, using 1 hour.")
+            hours_threshold = 1 # Safety check
+
+        threshold_time = datetime.utcnow() - timedelta(hours=hours_threshold)
         try:
-            enabled = get_db_config_value(CONFIG_AUTO_RELEASE_ENABLED, default=False, value_type=bool)
-            if not enabled:
-                app.logger.info("Auto lock release is disabled in config. Skipping.")
-                return
-            
-            hours = get_db_config_value(CONFIG_AUTO_RELEASE_HOURS, default=None, value_type=int)
-            if not hours or hours <= 0:
-                app.logger.warning(f"Auto lock release enabled but hours invalid ({hours}). Skipping.")
-                return
-
-            cutoff_time = datetime.utcnow() - timedelta(hours=hours)
-            app.logger.info(f"Auto lock release: Deleting locks older than {cutoff_time.isoformat()} ({hours} hours)")
-            
-            locks_to_delete = Lock.query.filter(Lock.timestamp < cutoff_time).all()
-            
-            if not locks_to_delete:
-                app.logger.info("Auto lock release: No old locks found to delete.")
-                return
-
-            count = len(locks_to_delete)
-            deleted_paths = [l.asset_path for l in locks_to_delete]
-
-            for lock in locks_to_delete:
-                db.session.delete(lock)
-            
-            db.session.commit()
-            app.logger.info(f"Auto lock release: Successfully deleted {count} old locks: {deleted_paths}")
-
+            old_locks = Lock.query.filter(Lock.timestamp < threshold_time).all()
+            if old_locks:
+                for lock in old_locks:
+                    app.logger.info(f"Auto-releasing lock ID {lock.id} for path '{lock.asset_path}' (older than {hours_threshold} hours). Held by '{lock.locked_by}'.")
+                    db.session.delete(lock)
+                db.session.commit()
+            else:
+                app.logger.info("No old locks found to auto-release.")
         except SQLAlchemyError as e:
             db.session.rollback()
-            app.logger.error(f"Database error during scheduled auto-release: {e}", exc_info=True)
+            app.logger.error(f"Database error during auto-release job: {e}", exc_info=True)
         except Exception as e:
-            app.logger.error(f"Unexpected error during scheduled auto-release: {e}", exc_info=True)
+            app.logger.error(f"Unexpected error during auto-release job: {e}", exc_info=True)
 
 # Add job to run every hour (adjust interval as needed)
 # The job store ensures this job is added only once across multiple processes/workers
@@ -378,6 +382,23 @@ def get_db_config_value(key, default=None, value_type=str):
         logger.warning(f"Could not cast config value for key '{key}' ('{str_value}') to type {value_type}. Returning default.")
         return default
 
+# --- Helper function to get config value from DB, falling back to App Config (Env Default) ---
+def get_effective_config_value(db_key, app_config_key, value_type=str, default_value=None):
+    """Gets a config value, checking DB first, then app.config (env var default)."""
+    db_value = get_db_config_value(db_key, value_type=value_type)
+    if db_value is not None:
+        return db_value
+    # Fallback to app.config (environment variable default)
+    # Ensure we are in an app context to access current_app
+    if has_app_context(): 
+        return current_app.config.get(app_config_key, default_value)
+    else:
+        # Fallback if no context (should not happen in normal request/CLI flow but safer)
+        # This might require loading config manually if needed outside context
+        # For simplicity, returning default here. Adjust if needed.
+        return default_value
+# ----------------------------------------------------------------------------------------
+
 # -- Admin Required Decorator --
 def admin_required(fn):
     """Decorator to ensure the requesting user has admin privileges."""
@@ -408,9 +429,9 @@ def admin_required(fn):
 # ----------------------------
 # Authentication Endpoint
 # ----------------------------
-@app.route("/login", methods=["POST"])
-@limiter.limit("10 per minute") # Stricter limit for login attempts
+@app.route("/login", methods=["POST", "OPTIONS"])
 @cross_origin(supports_credentials=True)
+@limiter.limit("10/minute") # Apply rate limiting
 def login():
     """Authenticates a user and returns a JWT access token.
 
@@ -434,19 +455,16 @@ def login():
 
     user = User.query.filter_by(username=validated_data.username).first()
     if user and user.check_password(validated_data.password):
-        # Determine token expiration based on configuration
-        expires_delta = False # Default: never expire
-        jwt_expiry_enabled = get_db_config_value(CONFIG_JWT_EXPIRY_ENABLED, default=False, value_type=bool)
-        if jwt_expiry_enabled:
-            minutes = get_db_config_value(CONFIG_JWT_EXPIRY_MINUTES, default=None, value_type=int)
-            if minutes and minutes > 0:
-                expires_delta = timedelta(minutes=minutes)
-            else:
-                # Log warning if enabled but minutes invalid/missing, fallback to no expiry
-                app.logger.warning(f"JWT Expiry enabled but invalid/missing minutes ({minutes}). Token will not expire.")
+        # Determine token expiry using effective values
+        expiry_enabled = get_effective_config_value(CONFIG_JWT_EXPIRY_ENABLED, "JWT_EXPIRY_ENABLED_DEFAULT", bool, False)
+        expiry_minutes = get_effective_config_value(CONFIG_JWT_EXPIRY_MINUTES, "JWT_EXPIRY_MINUTES_DEFAULT", int, 0)
+        expires_delta = timedelta(minutes=expiry_minutes) if expiry_enabled and expiry_minutes > 0 else False
         
-        # Create token with potentially configured expiry
-        access_token = create_access_token(identity=user.username, expires_delta=expires_delta)
+        access_token = create_access_token(
+            identity=user.username,
+            additional_claims={"is_admin": user.is_admin},
+            expires_delta=expires_delta
+        )
         # Return username along with token
         return jsonify(access_token=access_token, username=user.username), 200
 
@@ -974,41 +992,70 @@ def change_password_self():
     except ValidationError as e:
         return jsonify({"msg": "Validation Error", "details": e.errors()}), 400
 
-    if not user.check_password(validated_data.current_password):
-        return jsonify({"msg": "Incorrect current password."}), 401
+    # Verify current password
+    if not check_password_hash(user.password_hash, validated_data.current_password):
+        return jsonify({"msg": "Invalid current password."}), 401
 
-    # Prevent setting same password
-    if user.check_password(validated_data.new_password):
-        return jsonify({"msg": "New password cannot be the same as the old password."}), 400
+    # --- Check if email confirmation should be skipped ---
+    # Use effective value for mail enabled check
+    skip_confirmation = not get_effective_config_value(CONFIG_MAIL_ENABLED, "MAIL_ENABLED", bool, False)
+    
+    if skip_confirmation:
+        try:
+            # Directly update the password hash
+            user.password_hash = generate_password_hash(validated_data.new_password)
+            # Clear any potentially stale confirmation fields
+            user.pending_password_hash = None
+            user.confirmation_token = None
+            user.token_expiration = None
+            db.session.commit()
+            app.logger.info(f"User {current_user_username} changed password directly (email disabled).")
+            # Note: Consider sending an in-app notification if available
+            return jsonify({"msg": "Password updated successfully."}), 200
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            app.logger.error(f"Database error directly updating password for user {current_user_username}: {e}", exc_info=True)
+            return jsonify({"msg": "Database error occurred while updating password."}), 500
+        except Exception as e:
+            app.logger.error(f"Unexpected error directly updating password for user {current_user_username}: {e}", exc_info=True)
+            return jsonify({"msg": "An unexpected error occurred."}), 500
+    else:
+        # Generate token and store pending change (original logic)
+        try:
+            token, expiration = generate_confirmation_token(user.id, TOKEN_PASSWORD_CONFIRM)
+            user.pending_password_hash = generate_password_hash(validated_data.new_password)
+            user.confirmation_token = token
+            user.token_expiration = expiration
+            db.session.commit()
 
-    # Generate confirmation token and URL
-    # Use the constant TOKEN_PASSWORD_CONFIRM for the type/salt
-    token, expiration = generate_confirmation_token(user.id, TOKEN_PASSWORD_CONFIRM)
-    # Pass the *same constant* to generate_confirmation_url for correct path mapping
-    confirmation_url = generate_confirmation_url(token, TOKEN_PASSWORD_CONFIRM)
+            # Send confirmation email to the user's *current confirmed* email address
+            try:
+                send_email(
+                    subject="Confirm Your Password Change",
+                    recipients=[user.email], # Send to current confirmed email
+                    text_body=f"Hello {user.username},\n\nPlease click the following link to confirm your password change for the Asset Lock Manager: {generate_confirmation_url(token, TOKEN_PASSWORD_CONFIRM)}\n\nThis link will expire at {expiration.isoformat()} UTC. If you did not request this change, please ignore this email or contact an administrator.",
+                    html_body=f"<p>Hello {user.username},</p><p>Please click the link below to confirm your password change for the Asset Lock Manager:</p><p><a href=\"{generate_confirmation_url(token, TOKEN_PASSWORD_CONFIRM)}\">{generate_confirmation_url(token, TOKEN_PASSWORD_CONFIRM)}</a></p><p>This link will expire at {expiration.isoformat()} UTC.</p><p>If you did not request this change, please ignore this email or contact an administrator.</p>"
+                )
+                app.logger.info(f"Sent password change confirmation link to {user.email} for user {user.username}")
+            except Exception as email_error:
+                db.session.rollback() # Rollback token/pending hash storage if email fails
+                app.logger.error(f"Failed to send password change confirmation to {user.email}: {email_error}", exc_info=True)
+                return jsonify({"msg": "Failed to send confirmation email. Please try again later."}), 500
 
-    # Store pending hash and token details
-    user.pending_password_hash = generate_password_hash(validated_data.new_password)
-    user.confirmation_token = token
-    user.token_expiration = expiration
-    # Do NOT change user.password_hash yet
-    db.session.commit()
+            return jsonify({"msg": f"Confirmation email sent to {user.email}. Please check your inbox to complete the change."}), 200
 
-    # Send confirmation email to the user's *current confirmed* email address
-    try:
-        send_email(
-            subject="Confirm Your Password Change",
-            recipients=[user.email], # Send to current confirmed email
-            text_body=f"Hello {user.username},\n\nPlease click the following link to confirm your password change for the Asset Lock Manager: {confirmation_url}\n\nThis link will expire at {expiration.isoformat()} UTC. If you did not request this change, please ignore this email or contact an administrator.",
-            html_body=f"<p>Hello {user.username},</p><p>Please click the link below to confirm your password change for the Asset Lock Manager:</p><p><a href=\"{confirmation_url}\">{confirmation_url}</a></p><p>This link will expire at {expiration.isoformat()} UTC.</p><p>If you did not request this change, please ignore this email or contact an administrator.</p>"
-        )
-        app.logger.info(f"Sent password change confirmation link to {user.email} for user {user.username}")
-    except Exception as email_error:
-        db.session.rollback() # Rollback token/pending hash storage if email fails
-        app.logger.error(f"Failed to send password change confirmation to {user.email}: {email_error}", exc_info=True)
-        return jsonify({"msg": "Failed to send confirmation email. Please try again later."}), 500
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            app.logger.error(f"Database error confirming password for user ID {user.id}: {e}", exc_info=True)
+            return jsonify({"msg": "Database error occurred during confirmation."}), 500
+        except Exception as e:
+            db.session.rollback()
+            app.logger.error(f"Error confirming password for user ID {user_id}: {e}", exc_info=True)
+            return jsonify({"msg": "An unexpected error occurred during confirmation."}), 500
 
-    return jsonify({"msg": f"Confirmation email sent to {user.email}. Please check your inbox to complete the change."}), 200
+    # This function should always return a response from one of the branches
+    app.logger.error("Reached end of change_password_self without returning a response.")
+    return jsonify({"msg": "Internal server error."}), 500
 
 @app.route("/users/me/email", methods=["PUT", "OPTIONS"])
 @cross_origin(supports_credentials=True)
@@ -1040,13 +1087,15 @@ def change_email_self():
         return jsonify({"msg": "Validation Error", "details": e.errors()}), 400
 
     if not user.check_password(validated_data.current_password):
-        return jsonify({"msg": "Incorrect current password."}), 401
+        return jsonify({"msg": "Invalid current password."}), 401
 
     new_email = validated_data.new_email
-    if user.email == new_email:
-        return jsonify({"msg": "New email address cannot be the same as the current one."}), 400
 
-    # Check if the new email is already taken (confirmed or pending) by *another* user
+    # Prevent setting the same email
+    if user.email == new_email:
+        return jsonify({"msg": "New email cannot be the same as the current email."}), 400
+
+    # Check if the new email is already taken (or pending) by *another* user
     existing_user = User.query.filter(
         (User.email == new_email) | (User.pending_email == new_email),
         User.id != user.id
@@ -1054,7 +1103,31 @@ def change_email_self():
     if existing_user:
         return jsonify({"msg": "Conflict: Email already in use or pending confirmation by another user."}), 409
 
-    # Generate token and store pending change
+    # --- Check if email confirmation should be skipped ---
+    # Use effective value for mail enabled check
+    skip_confirmation = not get_effective_config_value(CONFIG_MAIL_ENABLED, "MAIL_ENABLED", bool, False)
+
+    if skip_confirmation:
+        try:
+            # Directly update the email
+            user.email = new_email
+            # Clear any potentially stale confirmation fields
+            user.pending_email = None
+            user.confirmation_token = None
+            user.token_expiration = None
+            db.session.commit()
+            app.logger.info(f"User {current_user_username} changed email to {new_email} directly (email disabled).")
+            # Note: Consider sending an in-app notification if available
+            return jsonify({"msg": "Email updated successfully."}), 200
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            app.logger.error(f"Database error directly updating email for user {current_user_username}: {e}", exc_info=True)
+            return jsonify({"msg": "Database error occurred while updating email."}), 500
+        except Exception as e:
+            app.logger.error(f"Unexpected error directly updating email for user {current_user_username}: {e}", exc_info=True)
+            return jsonify({"msg": "An unexpected error occurred."}), 500
+
+    # Generate token and store pending change (original logic if MAIL_ENABLED is True)
     try:
         token, expiration = generate_confirmation_token(user.id, TOKEN_EMAIL_CONFIRM)
         user.pending_email = new_email
@@ -1108,36 +1181,40 @@ CONFIG_JWT_EXPIRY_ENABLED = "jwt.expiry.enabled"
 CONFIG_JWT_EXPIRY_MINUTES = "jwt.expiry.minutes"
 CONFIG_AUTO_RELEASE_ENABLED = "auto_release.enabled"
 CONFIG_AUTO_RELEASE_HOURS = "auto_release.hours"
-CONFIG_MAIL_SERVER = "mail.server"
-CONFIG_MAIL_PORT = "mail.port"
-CONFIG_MAIL_USE_TLS = "mail.use_tls"
-CONFIG_MAIL_USE_SSL = "mail.use_ssl"
-CONFIG_MAIL_USERNAME = "mail.username"
-CONFIG_MAIL_PASSWORD = "mail.password" # Note: Storing password in DB might be insecure, consider alternatives
-CONFIG_MAIL_SENDER = "mail.sender"
-CONFIG_MAIL_ENABLED = "mail.enabled" # Master switch for enabling/disabling email
+# Re-adding mail enabled constant for DB override
+CONFIG_MAIL_ENABLED = "mail.enabled"
 
 @app.route("/admin/config", methods=["GET", "OPTIONS"])
 @cross_origin(supports_credentials=True)
 @jwt_required()
 @admin_required
 def get_admin_config():
-    """Retrieve the current admin-configurable settings."""
+    """Retrieve the current admin-configurable settings, applying DB overrides over env defaults."""
     try:
-        # Fetch settings using the helper function
-        config_data = {
-            CONFIG_JWT_EXPIRY_ENABLED: get_db_config_value(CONFIG_JWT_EXPIRY_ENABLED, default=False, value_type=bool),
-            CONFIG_JWT_EXPIRY_MINUTES: get_db_config_value(CONFIG_JWT_EXPIRY_MINUTES, default=0, value_type=int),
-            CONFIG_AUTO_RELEASE_ENABLED: get_db_config_value(CONFIG_AUTO_RELEASE_ENABLED, default=False, value_type=bool),
-            CONFIG_AUTO_RELEASE_HOURS: get_db_config_value(CONFIG_AUTO_RELEASE_HOURS, default=0, value_type=int),
-            CONFIG_MAIL_ENABLED: get_db_config_value(CONFIG_MAIL_ENABLED, default=False, value_type=bool),
-            CONFIG_MAIL_SERVER: get_db_config_value(CONFIG_MAIL_SERVER, default=app.config.get("MAIL_SERVER")), # Use app config as fallback
-            CONFIG_MAIL_PORT: get_db_config_value(CONFIG_MAIL_PORT, default=app.config.get("MAIL_PORT"), value_type=int),
-            CONFIG_MAIL_USE_TLS: get_db_config_value(CONFIG_MAIL_USE_TLS, default=app.config.get("MAIL_USE_TLS"), value_type=bool),
-            CONFIG_MAIL_USE_SSL: get_db_config_value(CONFIG_MAIL_USE_SSL, default=app.config.get("MAIL_USE_SSL"), value_type=bool),
-            CONFIG_MAIL_USERNAME: get_db_config_value(CONFIG_MAIL_USERNAME, default=app.config.get("MAIL_USERNAME")),
-            CONFIG_MAIL_SENDER: get_db_config_value(CONFIG_MAIL_SENDER, default=app.config.get("MAIL_DEFAULT_SENDER")),
-        }
+        STARTUP_MAIL_TEST_STATUS_KEY = "system.startup.mail_test_status"
+        config_data = {}
+
+        # JWT Settings (DB override Env)
+        db_jwt_enabled = get_db_config_value(CONFIG_JWT_EXPIRY_ENABLED, value_type=bool) # Returns None if not in DB
+        config_data["jwt_expiry_enabled"] = db_jwt_enabled if db_jwt_enabled is not None else app.config.get("JWT_EXPIRY_ENABLED_DEFAULT", False)
+        
+        db_jwt_minutes = get_db_config_value(CONFIG_JWT_EXPIRY_MINUTES, value_type=int)
+        config_data["jwt_expiry_minutes"] = db_jwt_minutes if db_jwt_minutes is not None else app.config.get("JWT_EXPIRY_MINUTES_DEFAULT", 0)
+
+        # Auto Release Settings (DB override Env)
+        db_auto_release_enabled = get_db_config_value(CONFIG_AUTO_RELEASE_ENABLED, value_type=bool)
+        config_data["auto_release_enabled"] = db_auto_release_enabled if db_auto_release_enabled is not None else app.config.get("AUTO_RELEASE_ENABLED", False)
+        
+        db_auto_release_hours = get_db_config_value(CONFIG_AUTO_RELEASE_HOURS, value_type=int)
+        config_data["auto_release_hours"] = db_auto_release_hours if db_auto_release_hours is not None else app.config.get("AUTO_RELEASE_HOURS", 72)
+
+        # Mail Enabled Setting (DB override Env) - For display/control
+        db_mail_enabled = get_db_config_value(CONFIG_MAIL_ENABLED, value_type=bool)
+        config_data["mail_enabled"] = db_mail_enabled if db_mail_enabled is not None else app.config.get("MAIL_ENABLED", False)
+
+        # Add startup mail test status from DB (no env default for this)
+        config_data["startup_mail_test_status"] = get_db_config_value(STARTUP_MAIL_TEST_STATUS_KEY, default="UNKNOWN")
+
         return jsonify(config_data), 200
     except Exception as e:
         app.logger.error(f"Error fetching admin configuration: {e}", exc_info=True)
@@ -1145,19 +1222,12 @@ def get_admin_config():
 
 class AdminUpdateConfigSchema(BaseModel):
     """Schema for updating admin configuration."""
-    # Use Optional for keys that might not be present in every update request
     jwt_expiry_enabled: Optional[bool] = None
     jwt_expiry_minutes: Optional[int] = None
     auto_release_enabled: Optional[bool] = None
     auto_release_hours: Optional[int] = None
+    # Restoring mail_enabled
     mail_enabled: Optional[bool] = None
-    mail_server: Optional[str] = None
-    mail_port: Optional[int] = None
-    mail_use_tls: Optional[bool] = None
-    mail_use_ssl: Optional[bool] = None
-    mail_username: Optional[str] = None
-    mail_password: Optional[str] = None # Be cautious about updating/storing passwords this way
-    mail_sender: Optional[EmailStr] = None
 
 @app.route("/admin/config", methods=["PUT", "OPTIONS"])
 @cross_origin(supports_credentials=True)
@@ -1165,92 +1235,78 @@ class AdminUpdateConfigSchema(BaseModel):
 @admin_required
 def update_admin_config():
     """Update admin-configurable settings."""
-    try:
-        data = request.get_json()
-        config_update = AdminUpdateConfigSchema(**data)
-    except ValidationError as e:
-        return jsonify({"message": "Validation Error", "errors": e.errors()}), 400
-    except Exception as e:
-        app.logger.error(f"Error parsing update config request: {e}", exc_info=True)
-        return jsonify({"message": "Invalid request format"}), 400
+    json_data = request.get_json()
+    if not json_data:
+        return jsonify({"msg": "Missing JSON body"}), 400
 
     try:
-        with db.session.begin_nested(): # Use nested transaction for config updates
+        config_update = AdminUpdateConfigSchema(**json_data)
+    except ValidationError as e:
+        return jsonify({"msg": "Validation Error", "details": e.errors()}), 400
+
+    try:
+        # Identify keys we might update
+        keys_to_update = [
+            CONFIG_JWT_EXPIRY_ENABLED,
+            CONFIG_JWT_EXPIRY_MINUTES,
+            CONFIG_AUTO_RELEASE_ENABLED,
+            CONFIG_AUTO_RELEASE_HOURS,
+            CONFIG_MAIL_ENABLED
+        ]
+        
+        # Fetch existing config values beforehand
+        existing_configs = {c.key: c for c in Configuration.query.filter(Configuration.key.in_(keys_to_update)).all()}
+
+        with db.session.begin_nested():
+            # Helper to update or create config
+            def update_or_create_config(key, value_str):
+                if key in existing_configs:
+                    existing_configs[key].value = value_str
+                else:
+                    # Need to add the new object to the dict as well in case it's referenced later in the same transaction?
+                    # For now, just add to session. If there are dependencies, pre-fetching might need refinement.
+                    new_config = Configuration(key=key, value=value_str)
+                    db.session.add(new_config)
+                    # Add to dict to avoid trying to create again if set twice in payload (unlikely)
+                    existing_configs[key] = new_config 
+
             # JWT Settings
             if config_update.jwt_expiry_enabled is not None:
-                Configuration.set(CONFIG_JWT_EXPIRY_ENABLED, str(config_update.jwt_expiry_enabled))
+                update_or_create_config(CONFIG_JWT_EXPIRY_ENABLED, str(config_update.jwt_expiry_enabled))
             if config_update.jwt_expiry_minutes is not None:
-                # Store 0 or negative as indicator for 'infinite'
-                expiry_minutes = int(config_update.jwt_expiry_minutes)
-                Configuration.set(CONFIG_JWT_EXPIRY_MINUTES, str(expiry_minutes))
-                # Update app config immediately if expiry is enabled
-                if config_update.jwt_expiry_enabled or get_db_config_value(CONFIG_JWT_EXPIRY_ENABLED, False, bool):
-                    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(minutes=expiry_minutes) if expiry_minutes > 0 else False
-            elif config_update.jwt_expiry_enabled is False: # Explicitly disable
-                app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False
+                if config_update.jwt_expiry_minutes < 0:
+                   raise ValueError("JWT expiry minutes cannot be negative.")
+                update_or_create_config(CONFIG_JWT_EXPIRY_MINUTES, str(config_update.jwt_expiry_minutes))
 
             # Auto Release Settings
             if config_update.auto_release_enabled is not None:
-                Configuration.set(CONFIG_AUTO_RELEASE_ENABLED, str(config_update.auto_release_enabled))
+                update_or_create_config(CONFIG_AUTO_RELEASE_ENABLED, str(config_update.auto_release_enabled))
             if config_update.auto_release_hours is not None:
-                Configuration.set(CONFIG_AUTO_RELEASE_HOURS, str(int(config_update.auto_release_hours)))
+                if config_update.auto_release_hours < 1:
+                    raise ValueError("Auto-release hours must be at least 1.")
+                update_or_create_config(CONFIG_AUTO_RELEASE_HOURS, str(int(config_update.auto_release_hours)))
 
-            # Mail Settings
-            mail_settings_updated = False
+            # Mail Enabled Setting
             if config_update.mail_enabled is not None:
-                Configuration.set(CONFIG_MAIL_ENABLED, str(config_update.mail_enabled))
-                mail_settings_updated = True
-            if config_update.mail_server is not None:
-                Configuration.set(CONFIG_MAIL_SERVER, config_update.mail_server)
-                mail_settings_updated = True
-            if config_update.mail_port is not None:
-                Configuration.set(CONFIG_MAIL_PORT, str(int(config_update.mail_port)))
-                mail_settings_updated = True
-            if config_update.mail_use_tls is not None:
-                Configuration.set(CONFIG_MAIL_USE_TLS, str(config_update.mail_use_tls))
-                mail_settings_updated = True
-            if config_update.mail_use_ssl is not None:
-                Configuration.set(CONFIG_MAIL_USE_SSL, str(config_update.mail_use_ssl))
-                mail_settings_updated = True
-            if config_update.mail_username is not None:
-                Configuration.set(CONFIG_MAIL_USERNAME, config_update.mail_username)
-                mail_settings_updated = True
-            if config_update.mail_password is not None:
-                # WARNING: Storing plain password in DB is insecure. Consider alternatives like vault integration.
-                app.logger.warning("Updating MAIL_PASSWORD in database configuration. Ensure secure storage practices.")
-                Configuration.set(CONFIG_MAIL_PASSWORD, config_update.mail_password)
-                mail_settings_updated = True
-            if config_update.mail_sender is not None:
-                Configuration.set(CONFIG_MAIL_SENDER, config_update.mail_sender)
-                mail_settings_updated = True
+                update_or_create_config(CONFIG_MAIL_ENABLED, str(config_update.mail_enabled))
 
-        db.session.commit()
+        # Nested transaction commits here if no error
+        
+        db.session.commit() # Commit the main transaction
 
-        # Reload Flask-Mail config if settings were changed
-        if mail_settings_updated:
-            app.logger.info("Reloading Flask-Mail configuration from database...")
-            app.config["MAIL_ENABLED"] = get_db_config_value(CONFIG_MAIL_ENABLED, default=False, value_type=bool)
-            app.config["MAIL_SERVER"] = get_db_config_value(CONFIG_MAIL_SERVER, default=app.config["MAIL_SERVER"])
-            app.config["MAIL_PORT"] = get_db_config_value(CONFIG_MAIL_PORT, default=app.config["MAIL_PORT"], value_type=int)
-            app.config["MAIL_USE_TLS"] = get_db_config_value(CONFIG_MAIL_USE_TLS, default=app.config["MAIL_USE_TLS"], value_type=bool)
-            app.config["MAIL_USE_SSL"] = get_db_config_value(CONFIG_MAIL_USE_SSL, default=app.config["MAIL_USE_SSL"], value_type=bool)
-            app.config["MAIL_USERNAME"] = get_db_config_value(CONFIG_MAIL_USERNAME, default=app.config["MAIL_USERNAME"])
-            app.config["MAIL_PASSWORD"] = get_db_config_value(CONFIG_MAIL_PASSWORD, default=app.config["MAIL_PASSWORD"]) # Load updated password
-            app.config["MAIL_DEFAULT_SENDER"] = get_db_config_value(CONFIG_MAIL_SENDER, default=app.config["MAIL_DEFAULT_SENDER"])
-            # Re-initialize Mail with updated config
-            mail = Mail(app)
-
-        app.logger.info("Admin configuration updated successfully.")
         return jsonify({"message": "Configuration updated successfully"}), 200
-
+    except ValueError as ve:
+        db.session.rollback() # Rollback main transaction
+        app.logger.warning(f"Configuration update validation error: {ve}")
+        return jsonify({"msg": "Validation Error", "details": str(ve)}), 400
     except SQLAlchemyError as e:
-        db.session.rollback()
+        db.session.rollback() # Rollback main transaction
         app.logger.error(f"Database error updating configuration: {e}", exc_info=True)
-        return jsonify({"message": "Database error during update"}), 500
+        return jsonify({"message": "Database error occurred during update."}), 500
     except Exception as e:
-        db.session.rollback() # Rollback on any other error too
+        db.session.rollback() # Rollback main transaction
         app.logger.error(f"Unexpected error updating configuration: {e}", exc_info=True)
-        return jsonify({"message": "Failed to update configuration"}), 500
+        return jsonify({"message": "An unexpected error occurred."}), 500
 
 
 # ----------------------------
@@ -1387,170 +1443,62 @@ def create_admin_command():
     else:
         app.logger.info("Initial admin user environment variables not fully set. Skipping creation via CLI command.")
 
-# --- New Endpoint for Lock Holder Notification ---
-@app.route("/locks/path/<path:asset_path>/notify", methods=["POST", "OPTIONS"])
-@cross_origin(supports_credentials=True)
-@jwt_required()
-def notify_lock_holder(asset_path):
-    """Allows a user to send a notification email to the user holding a specific lock.
+# --- New CLI command for testing email ---
+@app.cli.command("test-email")
+def test_email_command():
+    """Sends a test email to the first admin user found in the database."""
+    with app.app_context(): # Ensure we are in app context for DB access etc.
+        # Check MAIL_ENABLED inside the context
+        if not current_app.config.get('MAIL_ENABLED', False):
+            print("Email sending is disabled (MAIL_ENABLED=False in config). Skipping test.")
+            return
+            
+        # Find the first user marked as admin
+        admin_user = User.query.filter_by(is_admin=True).first()
+        if not admin_user:
+            print("Error: No admin user found in the database.")
+            return
+        if not admin_user.email:
+            print(f"Error: Admin user '{admin_user.username}' (ID {admin_user.id}) does not have an email address configured.")
+            return
 
-    Expects an empty JSON body or no body.
-    Identifies lock by asset_path.
-    Returns:
-        JSON confirmation message on success (200).
-        JSON error message on failure (400, 403, 404, 500).
-    """
-    normalized_path = Lock.normalize_path(asset_path)
-    lock = Lock.query.filter_by(asset_path=normalized_path).first()
-
-    if not lock:
-        return jsonify({"msg": f"Lock not found for asset path: {normalized_path}"}), 404
-
-    requesting_user_username = get_jwt_identity()
-
-    # Prevent users from notifying themselves
-    if lock.locked_by == requesting_user_username:
-        return jsonify({"msg": "You cannot notify yourself about a lock you hold."}), 400
-
-    # Find the user who holds the lock to get their email
-    lock_holder_user = User.query.filter_by(username=lock.locked_by).first()
-    if not lock_holder_user or not lock_holder_user.email:
-        app.logger.warning(f"Could not find user or email for lock holder '{lock.locked_by}' to send notification.")
-        return jsonify({"msg": "Could not find email address for the lock holder."}), 404 # Or 500?
-
-    # Send the notification email
-    try:
-        app.logger.info(f"User '{requesting_user_username}' triggering notification to '{lock.locked_by}' for lock on '{normalized_path}'")
-        send_email(
-            subject=f"Notification Regarding Locked Asset: {normalized_path}",
-            recipients=[lock_holder_user.email],
-            text_body=f"Hello {lock_holder_user.username},\n\nUser '{requesting_user_username}' has sent you a notification regarding the asset you currently have locked: '{normalized_path}'.\n\nPlease check if you still require the lock.",
-            html_body=f"<p>Hello {lock_holder_user.username},</p>" \
-                      f"<p>User <strong>{requesting_user_username}</strong> has sent you a notification regarding the asset you currently have locked: <code>{normalized_path}</code>.</p>" \
-                      f"<p>Please check if you still require the lock.</p>"
-        )
-        return jsonify({"msg": f"Notification sent successfully to {lock_holder_user.username}."}), 200
-    except Exception as email_error:
-        app.logger.error(f"Failed to send lock holder notification email to {lock_holder_user.email}: {email_error}", exc_info=True)
-        return jsonify({"msg": "Failed to send notification email."}), 500
-
-# --- End New Endpoint ---
-
-# ----------------------------
-# Confirmation Endpoints
-# ----------------------------
-
-@app.route("/confirm-email/<token>", methods=["GET"])
-def confirm_email(token):
-    """Handles email confirmation link clicks."""
-    user_id = verify_confirmation_token(token, TOKEN_EMAIL_CONFIRM)
-    if user_id is None:
-        # Consider returning a simple HTML page here instead of JSON?
-        # For now, returning JSON for API consistency.
-        return jsonify({"msg": "The confirmation link is invalid or has expired."}), 400
-
-    user = User.query.get(user_id)
-    if not user or not user.pending_email or user.confirmation_token != token:
-        # Token might have been used or user state is inconsistent
-        return jsonify({"msg": "Confirmation failed. Invalid user state or token already used."}), 400
-
-    # Check expiration just in case (though itsdangerous handles it)
-    if user.token_expiration and user.token_expiration < datetime.utcnow():
-        return jsonify({"msg": "The confirmation link has expired."}), 400
-
-    # --- Perform Email Change --- 
-    try:
-        old_email = user.email # For notification
-        confirmed_new_email = user.pending_email
-        
-        # Check again if the confirmed new email is now taken by someone else
-        # (in case another user confirmed it between request and confirmation)
-        existing_user = User.query.filter(
-            User.email == confirmed_new_email,
-            User.id != user.id
-        ).first()
-        if existing_user:
-            # Clear pending state on the current user as the email is now taken
-            user.pending_email = None
-            user.confirmation_token = None
-            user.token_expiration = None
-            db.session.commit()
-            return jsonify({"msg": "Confirmation failed. Email address is no longer available."}), 409
-
-        user.email = confirmed_new_email
-        user.pending_email = None
-        user.confirmation_token = None
-        user.token_expiration = None
-        db.session.commit()
-
-        # Send notification to OLD email (optional, consider config)
+        print(f"Attempting to send test email to admin '{admin_user.username}' at {admin_user.email}...")
         try:
+            # Use the existing send_email utility
             send_email(
-                subject="Email Address Changed Notification",
-                recipients=[old_email],
-                text_body=f"Hello,\n\nThis is a notification that the email address associated with your Asset Lock Manager account ({user.username}) was successfully changed to {user.email}. If you did not authorize this, please contact an administrator immediately.",
-                html_body=f"<p>Hello,</p><p>This is a notification that the email address associated with your Asset Lock Manager account ({user.username}) was successfully changed to <strong>{user.email}</strong>. If you did not authorize this, please contact an administrator immediately.</p>"
+                subject="Asset Lock Manager - Email System Test Successful",
+                recipients=[admin_user.email],
+                text_body=f"Hello {admin_user.username},\n\nThis email confirms that the email system for the Asset Lock Manager is configured correctly and operational.\n\nTest initiated via 'flask test-email' command.",
+                html_body=f"<p>Hello {admin_user.username},</p>" \
+                          f"<p>This email confirms that the email system for the Asset Lock Manager is configured correctly and operational.</p>" \
+                          f"<p><i>Test initiated via <code>flask test-email</code> command.</i></p>"
             )
-        except Exception as email_error:
-            app.logger.error(f"Failed to send email change security notification to old address {old_email}: {email_error}", exc_info=True)
-            # Don't fail the confirmation if this notification fails.
+            # Note: send_email is async, so success here means the task was queued.
+            # We rely on logs from send_async_email for actual send status.
+            print("Test email task queued successfully. Check server logs for send status.")
+        except Exception as e:
+            print(f"Error queuing test email: {e}")
+            current_app.logger.error(f"Error encountered in test-email command: {e}", exc_info=True)
 
-        app.logger.info(f"User {user.username} (ID: {user.id}) successfully confirmed email change to {user.email}")
-        # Return success message (or redirect to a frontend success page)
-        return jsonify({"msg": "Email address confirmed successfully!"}), 200
+# --- End new CLI command ---
 
-    except SQLAlchemyError as e:
-        db.session.rollback()
-        app.logger.error(f"Database error confirming email for user ID {user_id}: {e}", exc_info=True)
-        return jsonify({"msg": "Database error occurred during confirmation."}), 500
-    except Exception as e:
-        db.session.rollback()
-        app.logger.error(f"Error confirming email for user ID {user_id}: {e}", exc_info=True)
-        return jsonify({"msg": "An unexpected error occurred during confirmation."}), 500
-
-@app.route("/confirm-password/<token>", methods=["GET"])
-def confirm_password(token):
-    """Handles password confirmation link clicks."""
-    user_id = verify_confirmation_token(token, TOKEN_PASSWORD_CONFIRM)
-    if user_id is None:
-        return jsonify({"msg": "The confirmation link is invalid or has expired."}), 400
-
-    user = User.query.get(user_id)
-    if not user or not user.pending_password_hash or user.confirmation_token != token:
-        return jsonify({"msg": "Confirmation failed. Invalid user state or token already used."}), 400
-
-    if user.token_expiration and user.token_expiration < datetime.utcnow():
-        return jsonify({"msg": "The confirmation link has expired."}), 400
-
-    # --- Perform Password Change --- 
-    try:
-        user.password_hash = user.pending_password_hash
-        user.pending_password_hash = None
-        user.confirmation_token = None
-        user.token_expiration = None
-        db.session.commit()
-
-        # Send confirmation email (optional)
+# --- New CLI command for setting configuration ---
+@app.cli.command("set-config")
+@click.argument("key")
+@click.argument("value")
+def set_config_command(key, value):
+    """Sets or updates a configuration key in the database."""
+    with app.app_context():
         try:
-            send_email(
-                subject="Password Changed Successfully",
-                recipients=[user.email],
-                text_body=f"Hello {user.username},\n\nYour password for the Asset Lock Manager was successfully changed after confirmation. If you did not authorize this change, please contact an administrator immediately.",
-                html_body=f"<p>Hello {user.username},</p><p>Your password for the Asset Lock Manager was successfully changed after confirmation. If you did not authorize this change, please contact an administrator immediately.</p>"
-            )
-        except Exception as email_error:
-             app.logger.error(f"Failed to send final password change confirmation to {user.email}: {email_error}", exc_info=True)
-             # Don't fail the confirmation if this notification fails.
+            Configuration.set(key, value)
+            print(f"Configuration key '{key}' set to '{value}'.")
+        except Exception as e:
+            print(f"Error setting configuration key '{key}': {e}")
+            # Optionally exit with non-zero status
+            # import sys
+            # sys.exit(1)
+# --- End new CLI command ---
 
-        app.logger.info(f"User {user.username} (ID: {user.id}) successfully confirmed password change.")
-        # Return success message (or redirect)
-        return jsonify({"msg": "Password confirmed successfully!"}), 200
-
-    except SQLAlchemyError as e:
-        db.session.rollback()
-        app.logger.error(f"Database error confirming password for user ID {user_id}: {e}", exc_info=True)
-        return jsonify({"msg": "Database error occurred during confirmation."}), 500
-    except Exception as e:
-        db.session.rollback()
-        app.logger.error(f"Error confirming password for user ID {user_id}: {e}", exc_info=True)
-        return jsonify({"msg": "An unexpected error occurred during confirmation."}), 500
+# Run the application
+if __name__ == "__main__":
+    app.run(debug=app.debug, host="0.0.0.0", port=5001)
