@@ -9,19 +9,32 @@ if [ -n "${CUSTOM_CA_CERT_PATH}" ]; then
     if [ -f "${CUSTOM_CA_CERT_PATH}" ]; then
         # Determine destination filename
         DEST_FILENAME=${CUSTOM_CA_CERT_FILENAME:-custom-ca.crt}
-        DEST_PATH="/usr/local/share/ca-certificates/${DEST_FILENAME}"
+        DEST_DIR="/usr/local/share/ca-certificates"
+        DEST_PATH="${DEST_DIR}/${DEST_FILENAME}"
         echo "INFO: Found custom CA certificate at '${CUSTOM_CA_CERT_PATH}'. Installing to '${DEST_PATH}'..."
-        
-        # Ensure destination directory exists
-        mkdir -p "/usr/local/share/ca-certificates"
-        
-        # Copy the certificate
-        cp "${CUSTOM_CA_CERT_PATH}" "${DEST_PATH}"
-        
-        # Update the system trust store
+
+        # Check if sudo is available
+        if command -v sudo > /dev/null; then
+            SUDO_CMD="sudo"
+            echo "INFO: Using sudo for certificate installation."
+        else
+            SUDO_CMD=""
+            echo "INFO: sudo not found. Attempting certificate installation without it (may fail due to permissions)."
+        fi
+
+        # Ensure destination directory exists (might need sudo)
+        $SUDO_CMD mkdir -p "${DEST_DIR}"
+
+        # Copy the certificate (might need sudo)
+        $SUDO_CMD cp "${CUSTOM_CA_CERT_PATH}" "${DEST_PATH}"
+
+        # Update the system trust store (needs sudo/root)
         if command -v update-ca-certificates > /dev/null; then
-            update-ca-certificates
-            echo "INFO: Ran update-ca-certificates successfully."
+            if $SUDO_CMD update-ca-certificates; then
+                echo "INFO: Ran update-ca-certificates successfully."
+            else
+                echo "ERROR: Failed to run update-ca-certificates. Check permissions or sudo configuration." >&2
+            fi
         else
             echo "WARNING: update-ca-certificates command not found. Cannot update system trust store."
         fi
