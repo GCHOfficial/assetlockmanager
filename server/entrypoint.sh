@@ -3,6 +3,7 @@
 set -e
 
 # --- Custom CA Certificate Installation (Generic) ---
+# This script runs as root because the USER instruction was removed from the Dockerfile before ENTRYPOINT.
 echo "ENTRYPOINT: Checking for custom CA certificate installation..."
 if [ -n "${CUSTOM_CA_CERT_PATH}" ]; then
     echo "INFO: CUSTOM_CA_CERT_PATH is set to '${CUSTOM_CA_CERT_PATH}'."
@@ -13,27 +14,18 @@ if [ -n "${CUSTOM_CA_CERT_PATH}" ]; then
         DEST_PATH="${DEST_DIR}/${DEST_FILENAME}"
         echo "INFO: Found custom CA certificate at '${CUSTOM_CA_CERT_PATH}'. Installing to '${DEST_PATH}'..."
 
-        # Check if sudo is available
-        if command -v sudo > /dev/null; then
-            SUDO_CMD="sudo"
-            echo "INFO: Using sudo for certificate installation."
-        else
-            SUDO_CMD=""
-            echo "INFO: sudo not found. Attempting certificate installation without it (may fail due to permissions)."
-        fi
+        # Ensure destination directory exists
+        mkdir -p "${DEST_DIR}"
 
-        # Ensure destination directory exists (might need sudo)
-        $SUDO_CMD mkdir -p "${DEST_DIR}"
+        # Copy the certificate (running as root)
+        cp "${CUSTOM_CA_CERT_PATH}" "${DEST_PATH}"
 
-        # Copy the certificate (might need sudo)
-        $SUDO_CMD cp "${CUSTOM_CA_CERT_PATH}" "${DEST_PATH}"
-
-        # Update the system trust store (needs sudo/root)
+        # Update the system trust store (running as root)
         if command -v update-ca-certificates > /dev/null; then
-            if $SUDO_CMD update-ca-certificates; then
+            if update-ca-certificates; then
                 echo "INFO: Ran update-ca-certificates successfully."
             else
-                echo "ERROR: Failed to run update-ca-certificates. Check permissions or sudo configuration." >&2
+                echo "ERROR: Failed to run update-ca-certificates." >&2
             fi
         else
             echo "WARNING: update-ca-certificates command not found. Cannot update system trust store."
@@ -46,7 +38,7 @@ else
 fi
 # --- End Custom CA Certificate Installation ---
 
-# Apply database migrations first
+# Apply database migrations first (as root)
 echo "ENTRYPOINT: Running database migrations..."
 if flask db upgrade; then
     echo "ENTRYPOINT: Database migrations complete."
@@ -56,7 +48,7 @@ else
     exit $EXIT_CODE
 fi
 
-# Create initial admin user if variables are set and user doesn't exist
+# Create initial admin user if variables are set and user doesn't exist (as root)
 if [ -n "${INITIAL_ADMIN_USER}" ] && [ -n "${INITIAL_ADMIN_EMAIL}" ] && [ -n "${INITIAL_ADMIN_PASSWORD}" ]; then
     echo "ENTRYPOINT: Checking for initial admin user..."
     flask create-admin
@@ -64,16 +56,14 @@ else
     echo "ENTRYPOINT: Initial admin user variables not set, skipping creation check."
 fi
 
-# Run email test if enabled
+# Run email test if enabled (as root)
 if [ "${MAIL_ENABLED}" = "true" ]; then
     echo "ENTRYPOINT: MAIL_ENABLED is true, attempting test email..."
-    # Run in background or handle potential long timeout?
-    # For now, run synchronously but capture status
     if flask test-email; then
         echo "ENTRYPOINT: Startup email test command succeeded."
         flask set-config system.startup.mail_test_status SUCCESS
     else
-        echo "ERROR: Startup email test command failed." >&2 # Log error to stderr
+        echo "ERROR: Startup email test command failed." >&2
         flask set-config system.startup.mail_test_status FAILED
     fi
 else
@@ -81,6 +71,7 @@ else
     flask set-config system.startup.mail_test_status SKIPPED
 fi
 
-# Now execute the command passed as arguments (which defaults to the Dockerfile CMD)
-echo "ENTRYPOINT: Handing over execution to CMD ($@)..."
-exec "$@" 
+# Drop privileges and execute the command passed as arguments (CMD)
+# Use 'gosu' for Debian-based images (like python:3.11-slim)
+echo "ENTRYPOINT: Handing over execution to CMD ($@) as user 'filelockapiuser'..."
+exec gosu filelockapiuser "$@" 
