@@ -1,65 +1,82 @@
-# Asset Lock Manager - Git Pre-Commit Hook
+# 🎣 Asset Lock Manager - Git Pre-Commit Hook
 
 This directory contains the `pre-commit` script that integrates with the Asset Lock Manager system.
 
-## Purpose
+--- 
 
-This hook automatically checks files being committed against the Asset Lock Manager server. If any staged file is found to be locked by *another* user, the commit is aborted to prevent potential merge conflicts or overwriting locked work.
+## 🎯 Purpose
 
-## Prerequisites
+This Git hook automatically checks files being committed against the Asset Lock Manager server. If any staged file is found to be locked by **another** user, the commit is **aborted** to prevent potential merge conflicts or overwriting locked work. This is particularly crucial for binary assets like those found in **Unreal Engine projects** (`.uasset`, `.umap`) where merging is difficult or impossible.
 
-Before installing this hook in your target repository, ensure:
+--- 
 
-1.  **Python 3.x is installed** on the system where you will be committing.
-2.  **The `requests` library is installed** for Python (`pip install requests`).
-3.  **The Asset Lock Manager Client (`client/asset_lock_manager.py`) is accessible:**
-    *   The easiest way is often to place the `client/` directory (or a symlink to it) somewhere accessible and ensure the hook script knows where to find `asset_lock_manager.py` (see Installation Option 2 below).
-    *   Alternatively, ensure `client/asset_lock_manager.py` is in the system's PATH.
-4.  **The Asset Lock Manager Client is configured:** The client script needs to know the URL of your running Asset Lock Manager backend API. Configure this *within your target repository clone* using one of the methods described in `client/README.md` (e.g., `python /path/to/client/asset_lock_manager.py configure --backend http://localhost:8080/api`).
+## ✅ Prerequisites
 
-## Installation
+Before setting up this hook in your target repository (e.g., your Unreal project repo), ensure:
 
-Choose **one** of the following methods to install the hook into the Git repository where you want to enforce lock checking:
-
-**Option 1: Simple Copy (Requires Client in PATH or Edit Hook)**
-
-1.  Navigate to your target repository:
+1.  **🐍 Python 3.x is installed** on the system where you will be committing.
+2.  **📦 The `requests` library is installed** for Python:
     ```bash
-    cd /path/to/your/project/repository
+    pip install requests 
+    # or 
+    pip3 install requests
     ```
-2.  Copy the `pre-commit` script from this `hooks` directory into your repository's `.git/hooks/` directory:
+3.  **⌨️ The Asset Lock Manager Client (`client/asset_lock_manager.py`) is placed at the ROOT** of your target repository.
+    *   Copy the `client/asset_lock_manager.py` file from the main `asset-lock-manager` repository into the root directory of your target project repository.
+4.  **⚙️ The Asset Lock Manager Client is configured:** The client script (now at your repo root) needs the URL of your running Asset Lock Manager backend API. Configure this *within your target repository clone* using one of the methods described in `client/README.md` (run from your repo root):
     ```bash
-    # Adjust path to this hooks directory as needed
-    cp /path/to/asset-lock-manager/hooks/pre-commit .git/hooks/pre-commit
+    # Example: Configure backend URL using the client script at the repo root
+    python asset_lock_manager.py configure --backend http://localhost:8080/api
     ```
-3.  Make the hook executable:
+
+--- 
+
+## 💾 Installation (Recommended)
+
+This method places the hook script within your repository, making it easily shareable with the team.
+
+1.  **Create Directory:** In the **root** of your target repository (e.g., your Unreal project repo), create a directory named `.githooks`:
     ```bash
-    chmod +x .git/hooks/pre-commit
+    # Run from your target repository root
+    mkdir .githooks
     ```
-4.  **Important:** If the `asset_lock_manager.py` client script is *not* in your system's PATH, you **must edit** the `.git/hooks/pre-commit` script and change the `CLIENT_SCRIPT_CMD` variable near the top to the full path of the `asset_lock_manager.py` script (e.g., `CLIENT_SCRIPT_CMD="python /path/to/asset-lock-manager/client/asset_lock_manager.py"`).
-
-**Option 2: Symlink (Recommended if client location is stable)**
-
-1.  Navigate to your target repository:
+2.  **Copy Hook:** Copy the `pre-commit` script from *this* `hooks` directory into the new `.githooks` directory in your target repository:
+    *   **Linux/macOS:**
+        ```bash
+        cp /path/to/asset-lock-manager/hooks/pre-commit .githooks/pre-commit
+        ```
+    *   **Windows (Command Prompt):**
+        ```cmd
+        copy "\path\to\asset-lock-manager\hooks\pre-commit" ".githooks\pre-commit"
+        ```
+    *   **Windows (PowerShell):**
+        ```powershell
+        Copy-Item "/path/to/asset-lock-manager/hooks/pre-commit" -Destination ".githooks/pre-commit"
+        ```
+        *(Adjust source paths as needed)*
+3.  **Make Executable (Linux/macOS):**
     ```bash
-    cd /path/to/your/project/repository
+    chmod +x .githooks/pre-commit
     ```
-2.  Create a symbolic link from the `pre-commit` script in this `hooks` directory to your repository's `.git/hooks/` directory:
+    *(Windows/Git for Windows usually handles this, but apply if needed)*.
+4.  **Configure Git:** Tell Git to use this new hooks directory. **Each user needs to run this once per clone** of the target repository:
     ```bash
-    # Adjust path to this hooks directory as needed
-    ln -s /path/to/asset-lock-manager/hooks/pre-commit .git/hooks/pre-commit 
+    # Run from your target repository root
+    git config core.hooksPath .githooks
     ```
-    *(Note: Ensure the source path in the `ln -s` command is correct relative to where you run it, or use an absolute path)*.
-3.  **Important:** Ensure the `CLIENT_SCRIPT_CMD` variable near the top of the *original* `hooks/pre-commit` script points correctly to your `client/asset_lock_manager.py` (e.g., using a relative path from the hook's location if appropriate, or an absolute path).
+5.  **Verify Hook Script:** Ensure the `CLIENT_SCRIPT_CMD` variable near the top of the `.githooks/pre-commit` script is set correctly. It should now default to assuming `asset_lock_manager.py` is at the repository root (e.g., `CLIENT_SCRIPT_CMD="python ./asset_lock_manager.py"`). See step 2 in the next section.
 
-## How it Works
+--- 
 
-When you run `git commit`, Git executes the `.git/hooks/pre-commit` script.
+## 🤔 How it Works
 
-1.  The script finds all staged files.
-2.  It iterates through the staged files and calls `python /path/to/client/asset_lock_manager.py --repo . check -- <file>` for each one.
-3.  The client script communicates with the API server to check the lock status.
-4.  If a file is locked by *another* user, the client script exits with a non-zero status code.
-5.  The hook script detects the non-zero exit code, prints an error message listing the locked file(s), and exits non-zero, which aborts the commit.
+When you run `git commit` in your target repository:
 
-Files locked by the *current* user (based on the logged-in user for the client script in that repository) do **not** block the commit. 
+1.  Git executes the `.githooks/pre-commit` script (because of `git config core.hooksPath`).
+2.  The script finds all **staged** files (`git diff --cached --name-only`).
+3.  It iterates through these files and calls `python ./asset_lock_manager.py check -- <file>` (assuming the client is at the root).
+4.  The client script contacts the API server to get the lock status.
+5.  If a file is locked by **another user**, the client script exits with an error code.
+6.  The hook script catches this error, prints a message listing the conflicting locked file(s), and **aborts the commit** (by exiting with a non-zero status).
+
+✅ Files locked by **you** (the user logged in via the client in that repo) do **not** block the commit. 

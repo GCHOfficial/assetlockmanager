@@ -9,6 +9,14 @@
 # Set VERBOSE to non-empty for detailed output (e.g., export ASSET_LOCK_HOOK_VERBOSE=1)
 VERBOSE="${ASSET_LOCK_HOOK_VERBOSE}"
 
+# Set this variable to the command needed to execute the client script.
+# Assumes asset_lock_manager.py is at the repository root where this hook runs.
+CLIENT_SCRIPT_CMD="python ./asset_lock_manager.py"
+# Example if client is elsewhere:
+# CLIENT_SCRIPT_CMD="python /path/to/your/tools/asset-lock-manager/client/asset_lock_manager.py"
+# Example if client is in PATH:
+# CLIENT_SCRIPT_CMD="asset_lock_manager.py"
+
 echo "Running pre-commit hook to verify UE5 asset locks..."
 staged_files=$(git diff --cached --name-only)
 has_locked_assets=0

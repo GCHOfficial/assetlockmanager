@@ -1,70 +1,108 @@
-# Asset Lock Manager Client
+# ⌨️ Asset Lock Manager - Client CLI
 
 This directory contains the Python command-line interface (CLI) client (`asset_lock_manager.py`) for interacting with the Asset Lock Manager API.
 
-## Usage
+**❗ Recommended Usage:** Copy *this script* (`asset_lock_manager.py`) to the **root directory** of your target project repository (e.g., your Unreal Engine project). This makes it easy for the Git Hook (see below) and all users to access it consistently.
 
-Run the client from your terminal:
+This tool is essential for:
+*   Scripting lock operations.
+*   Integrating lock checks into other systems (like the provided Git Hook).
+*   Users who prefer a command-line workflow, often common in game development (e.g., with Unreal Engine projects).
+
+--- 
+
+## ▶️ Usage
+
+Assuming you have copied `asset_lock_manager.py` to your project root, run it from the **root of your project repository**:
 
 ```bash
-python asset_lock_manager.py --help
+python asset_lock_manager.py --help 
 ```
 
-**Important:** Before using commands like `acquire`, `release`, `list`, etc., you must configure the backend API URL.
+**❗ Important:** Before using commands like `acquire`, `release`, `list`, etc., you must configure the backend API URL (see below, run configuration from your project root).
 
-## Configuration
+--- 
 
-The client determines the backend API URL using the following priority:
+## ⚙️ Configuration: Setting the Backend URL
 
-1.  **`--backend <URL>` Command-line Argument:** Overrides all other settings.
+The client needs to know where the Asset Lock Manager server API is running. Configure this **from the root of your target project repository** using one of the following methods (priority order):
+
+1.  **`--backend <URL>` Command-line Argument (Highest Priority):**
+    *   Overrides all other settings for a single command execution.
     ```bash
-    # Example using the default Docker setup
+    # Example using the default Docker setup, run from project root
     python asset_lock_manager.py --backend http://localhost:8080/api list
     ```
-2.  **`ASSET_LOCK_BACKEND_URL` Environment Variable:** Set this variable in your shell.
-    ```bash
-    # Example using the default Docker setup
-    export ASSET_LOCK_BACKEND_URL="http://localhost:8080/api"
-    python asset_lock_manager.py list
-    ```
-3.  **Repository Configuration File (`.git/asset_lock_config.json`):** Set the URL specifically for this repository clone using the `configure` command:
-    ```bash
-    # Example using the default Docker setup
-    python asset_lock_manager.py configure --backend http://localhost:8080/api
-    ```
-    This creates/updates `.git/asset_lock_config.json` with the URL. This file is ignored by Git.
 
-If no URL is found via these methods, the client will display an error.
+2.  **`ASSET_LOCK_BACKEND_URL` Environment Variable:**
+    *   Set this variable in your shell for the current session or persistently.
+    *   **Linux/macOS (.bashrc, .zshrc, etc.):**
+        ```bash
+        export ASSET_LOCK_BACKEND_URL="http://localhost:8080/api"
+        ```
+    *   **Windows (Command Prompt - Current Session):**
+        ```cmd
+        set ASSET_LOCK_BACKEND_URL=http://localhost:8080/api
+        ```
+    *   **Windows (PowerShell - Current Session):**
+        ```powershell
+        $env:ASSET_LOCK_BACKEND_URL="http://localhost:8080/api"
+        ```
+    *   *(To set environment variables persistently on Windows, use the System Properties > Environment Variables dialog.)*
+    *   Once set, you can run commands directly (from project root):
+        ```bash
+        python asset_lock_manager.py list
+        ```
 
-Common commands:
+3.  **Repository Configuration File (`.git/asset_lock_config.json`) (Lowest Priority):**
+    *   Stores the backend URL specifically for the current Git repository clone.
+    *   Recommended for shared projects where the server URL is consistent for all users of that repo.
+    *   Use the `configure` command (*run from your project root*):
+        ```bash
+        # Example using the default Docker setup, run from project root
+        python asset_lock_manager.py configure --backend http://localhost:8080/api
+        ```
+    *   This creates/updates `.git/asset_lock_config.json` (which is ignored by Git by default).
+
+If no URL is found via these methods, the client will display an error message.
+
+--- 
+
+## 🚀 Common Commands
+
+*(Run these from your **project repository root**)*
 
 *   `login --username <your_username>` (prompts for password)
 *   `logout`
 *   `acquire <path/to/asset.uasset>`
 *   `release <path/to/asset.uasset>`
-*   `check <path/to/asset.uasset>`
-*   `list`
-*   `notify <path/to/asset.uasset>` (Send notification to lock holder)
-*   `auto-release [--branch <branch_name>]`
+*   `check <path/to/asset.uasset>` (Checks lock status)
+*   `list` (Lists all current locks)
+*   `notify <path/to/asset.uasset>` (Sends an email notification to the lock holder)
+*   `auto-release [--branch <branch_name>]` (Releases locks on a specific branch, useful for CI/CD)
 
-Use the `--repo <path_to_repo>` argument if running the client from outside the repository root.
+Use `python asset_lock_manager.py <command> --help` for details on specific commands.
 
-## Authentication Token
+--- 
 
-Upon successful login, the client saves a JWT authentication token *within the repository's* `.git` *directory* to:
+## 🔑 Authentication Token
 
-`.git/asset_lock_token.json`
+Upon successful login, the client saves a JWT authentication token to a file named `.git/asset_lock_token.json` *within the specific Git repository you are operating on*.
 
-This makes the login specific to this repository clone.
+This makes your login session specific to that repository clone.
 
-**Security Note:** Although stored within `.git` (which is typically not committed), this file contains your authentication token for this specific project. Ensure your filesystem permissions restrict access appropriately.
+**⚠️ Security Note:** Although stored within `.git` (which is typically not committed), this file contains your authentication token. Ensure your local filesystem permissions restrict access appropriately.
 
-## Prerequisites
+--- 
 
-*   Python 3.x
-*   `requests` Python library (`pip install requests`)
-*   `git` command-line tool
+## ✅ Prerequisites
 
-## Git Hook Integration
+*   **Python:** Version 3.x
+*   **Requests Library:** `pip install requests` (or `pip3 install requests`)
+*   **Git:** Command-line tool (used for finding repo root and storing config/token).
 
-The pre-commit hook located in `hooks/pre-commit` utilizes this client script to check for locked assets before allowing a commit. 
+--- 
+
+## 🎣 Git Hook Integration
+
+The pre-commit hook located in the main repository's `hooks/` directory utilizes this client script (`asset_lock_manager.py`) to check for locked assets before allowing a commit. See `hooks/README.md` for installation instructions. 
