@@ -1157,11 +1157,11 @@ def change_password_self():
             return jsonify({"msg": "Database error occurred during confirmation."}), 500
         except Exception as e:
             db.session.rollback()
-            app.logger.error(f"Error confirming password for user ID {user_id}: {e}", exc_info=True)
+            app.logger.error(f"Error confirming password for user ID {user.id}: {e}", exc_info=True)
             return jsonify({"msg": "An unexpected error occurred during confirmation."}), 500
 
     # This function should always return a response from one of the branches
-    app.logger.error("Reached end of change_password_self without returning a response.")
+    app.logger.error("Reached end of change_passworsd_self without returning a response.")
     return jsonify({"msg": "Internal server error."}), 500
 
 @app.route("/users/me/email", methods=["PUT", "OPTIONS"])
