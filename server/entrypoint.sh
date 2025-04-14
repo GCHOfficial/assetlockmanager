@@ -59,11 +59,16 @@ fi
 # Run email test if enabled (as root)
 if [ "${MAIL_ENABLED}" = "true" ]; then
     echo "ENTRYPOINT: MAIL_ENABLED is true, attempting test email..."
-    if flask test-email; then
-        echo "ENTRYPOINT: Startup email test command succeeded."
+    # Execute the command and capture its exit status explicitly
+    flask test-email
+    EMAIL_TEST_EXIT_CODE=$?
+
+    if [ $EMAIL_TEST_EXIT_CODE -eq 0 ]; then
+        echo "ENTRYPOINT: Startup email test command finished successfully (Exit Code: 0)."
         flask set-config system.startup.mail_test_status SUCCESS
     else
-        echo "ERROR: Startup email test command failed." >&2
+        # Error messages from flask test-email should already be on stderr
+        echo "ERROR: Startup email test command failed (Exit Code: $EMAIL_TEST_EXIT_CODE). Check logs above for details." >&2
         flask set-config system.startup.mail_test_status FAILED
     fi
 else

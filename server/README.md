@@ -62,6 +62,11 @@ While environment variables provide defaults and essential connection details, c
 
 If the `MAIL_ENABLED` environment variable is set to `true`, the `entrypoint.sh` script will automatically trigger the `flask test-email` command on startup. This sends a test email to the first admin user found and records the result (`SUCCESS`, `FAILED`, or `SKIPPED`) in the database under the key `system.startup.mail_test_status`.
 
+**Troubleshooting Email Timeouts:**
+*   **Verify SMTP Settings:** Double-check `MAIL_SERVER`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_USE_TLS`/`SSL` in your environment.
+*   **Same-Host Mail Server & Firewall:** If your `MAIL_SERVER` is on the *same host* as the Docker containers, the container needs to connect to the host's `MAIL_PORT`. Ensure your host firewall (e.g., `ufw`, `iptables`) allows incoming connections *on* the `MAIL_PORT` (e.g., 587/tcp) *from* the Docker network's IP range (check `docker network inspect <your_compose_project_name>_alm`). A `ufw` rule might look like: `sudo ufw allow from <docker_subnet> to any port <mail_port> proto tcp`.
+*   **Custom CA Certificates:** If using TLS/SSL with a self-signed or private CA certificate for your mail server, the `alm-api` container needs to trust it. Use the `CUSTOM_CA_CERT_PATH` and `CUSTOM_CA_CERT_FILENAME` environment variables along with a volume mount in your compose definition to install the certificate via the `entrypoint.sh` script. See the root `.env.example` for details.
+
 ## API Endpoints
 
 Key endpoints include:

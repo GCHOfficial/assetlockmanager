@@ -103,6 +103,9 @@ If `MAIL_ENABLED` is `true` in the environment, the system attempts to send a te
 
 See `.env.example` for a full list and descriptions.
 
+**Note on Firewalls (Same-Host Mail Server):**
+If your `MAIL_SERVER` runs on the *same host machine* as the Docker containers (e.g., on your VPS), you might need to adjust your host's firewall (like `ufw` or `iptables`). The `alm-api` container needs to be able to connect *out* to the host machine's `MAIL_PORT`. You must ensure your firewall allows incoming connections on the `MAIL_PORT` (e.g., 587/tcp) *from* the IP address range used by your Docker bridge network (often `172.17.0.0/16` by default, but check with `docker network inspect <your_compose_project_name>_alm`). For `ufw`, a rule like `sudo ufw allow from <docker_network_subnet> to any port <mail_port> proto tcp` might be needed.
+
 --- 
 
 ## 🚀 Deployment Options
