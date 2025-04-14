@@ -158,15 +158,22 @@ export const changeEmailSelf = async (payload: ChangeEmailPayload): Promise<Conf
 };
 
 // --- Notify Lock Holder API --- 
-export const notifyLockHolder = async (assetPath: string): Promise<ConfirmationResponse> => {
-    try {
-        const encodedAssetPath = encodeURIComponent(assetPath.startsWith('/') ? assetPath.substring(1) : assetPath);
-        const response = await apiClient.post<ConfirmationResponse>(`/locks/path/${encodedAssetPath}/notify`);
-        return response.data;
-    } catch (error) {
-        console.error(`Failed to send notification for ${assetPath}:`, error);
-        throw error;
-    }
+interface NotifyResponse {
+  msg: string;
+}
+
+export const notifyLockHolder = async (assetPath: string, message?: string): Promise<NotifyResponse> => {
+  try {
+    // Encode the asset path component correctly
+    const encodedPath = encodeURIComponent(assetPath);
+    const url = `/locks/path/${encodedPath}/notify`;
+    // Send message in the body if provided
+    const response = await apiClient.post<NotifyResponse>(url, message ? { message } : {}); 
+    return response.data;
+  } catch (error) {
+    console.error(`Failed to send notification for ${assetPath}:`, error);
+    throw error;
+  }
 };
 
 // --- Admin API Functions ---
@@ -286,6 +293,23 @@ export const updateAdminConfig = async (payload: Partial<AdminConfig>): Promise<
     await apiClient.put('/admin/config', payload);
   } catch (error) {
     console.error('Failed to update admin configuration:', error);
+    throw error;
+  }
+};
+
+// --- Public Config Status ---
+
+export interface ConfigStatus {
+  mail_enabled: boolean;
+}
+
+export const getConfigStatus = async (): Promise<ConfigStatus> => {
+  try {
+    const response = await apiClient.get<ConfigStatus>('/config/status');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch config status:', error);
+    // Re-throw to allow caller to handle
     throw error;
   }
 };

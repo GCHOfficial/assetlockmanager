@@ -29,7 +29,6 @@ from flask_mail import Mail, Message # Import Flask-Mail
 from utils.email import send_email
 from utils.token import (
     generate_confirmation_token,
-    verify_confirmation_token,
     generate_confirmation_url,
     TOKEN_EMAIL_CONFIRM,
     TOKEN_PASSWORD_CONFIRM
@@ -93,9 +92,8 @@ app.config["MAIL_USE_TLS"] = os.environ.get("MAIL_USE_TLS", "false").lower() in 
 app.config["MAIL_USE_SSL"] = os.environ.get("MAIL_USE_SSL", "false").lower() in ("true", "1", "t")
 app.config["MAIL_USERNAME"] = os.environ.get("MAIL_USERNAME")
 app.config["MAIL_PASSWORD"] = os.environ.get("MAIL_PASSWORD")
-app.config["MAIL_DEFAULT_SENDER"] = os.environ.get("MAIL_DEFAULT_SENDER", "noreply@example.com") # Default sender address
-app.config["MAIL_ENABLED"] = os.environ.get("MAIL_ENABLED", "false").lower() in ("true", "1", "t") # Load master enable switch
-app.config["MAIL_SUPPRESS_SEND"] = app.testing or os.environ.get("MAIL_SUPPRESS_SEND", "false").lower() in ("true", "1", "t") # Option to suppress sending emails
+app.config["MAIL_DEFAULT_SENDER"] = os.environ.get("MAIL_DEFAULT_SENDER", "Asset Lock Manager <noreply@example.com>")
+app.config["MAIL_ENABLED"] = os.environ.get("MAIL_ENABLED", "false").lower() in ("true", "1", "t")
 
 # -- Frontend URL Configuration --
 app.config["FRONTEND_BASE_URL"] = os.environ.get("FRONTEND_BASE_URL")
@@ -219,6 +217,11 @@ class CreateLockSchema(BaseModel):
 class AutoReleaseSchema(BaseModel):
     """Schema for auto-releasing locks by branch."""
     branch: str
+
+# --- Schema for Notify Message ---
+class NotifyMessageSchema(BaseModel):
+    """Schema for the optional message in notify request body."""
+    message: Optional[str] = None
 
 # Schemas for Admin User Management
 class CreateUserSchema(BaseModel):
@@ -702,6 +705,110 @@ def auto_release():
         app.logger.error(f"Database error during auto-release commit for branch {branch}: {e}", exc_info=True)
         return jsonify({"msg": "Database error occurred during auto-release commit."}), 500
     return jsonify({"msg": f"Auto-released {count} locks for branch {branch}"}), 200
+
+# --- Notify Lock Holder Endpoint ---
+@app.route("/locks/path/<path:asset_path>/notify", methods=["POST", "OPTIONS"])
+@cross_origin(supports_credentials=True)
+@jwt_required()
+def notify_lock_holder(asset_path):
+    """Sends an email notification to the holder of a specific lock.
+
+    Triggered by another authenticated user clicking the 'Notify' button.
+    Requires a valid JWT.
+    Returns:
+        JSON {"msg": "Notification sent successfully."} on success (200).
+        JSON with error message on failure (400, 404, 500).
+    """
+    notifier_username = get_jwt_identity()
+    notification_message = None # Default to no message
+
+    # Attempt to parse optional JSON body for a message
+    json_data = request.get_json(silent=True) # Use silent=True to not raise error if no body
+    if json_data:
+        try:
+            validated_data = NotifyMessageSchema(**json_data)
+            notification_message = validated_data.message # Can be None if not provided
+        except ValidationError as e:
+            # If body exists but doesn't match schema, return validation error
+            return jsonify({"msg": "Validation Error in request body", "details": e.errors()}), 400
+
+    normalized_path = Lock.normalize_path(asset_path)
+    lock = Lock.query.filter_by(asset_path=normalized_path).first()
+
+    if not lock:
+        return jsonify({"msg": "Lock not found for the specified asset path."}), 404
+
+    lock_holder_username = lock.locked_by
+
+    if notifier_username == lock_holder_username:
+        return jsonify({"msg": "You cannot notify yourself about your own lock."}), 400
+
+    # Find the lock holder user to get their email
+    lock_holder_user = User.query.filter_by(username=lock_holder_username).first()
+    if not lock_holder_user:
+        app.logger.error(f"Could not find user object for lock holder '{lock_holder_username}' during notification attempt for '{normalized_path}'.")
+        # Don't expose user existence details, return a generic error
+        return jsonify({"msg": "Could not process notification request."}), 500
+    if not lock_holder_user.email:
+        app.logger.warning(f"Lock holder '{lock_holder_username}' does not have an email address. Cannot send notification for '{normalized_path}'.")
+        return jsonify({"msg": f"User '{lock_holder_username}' has no email address configured. Notification not sent."}), 400
+
+    # Check if mail system is enabled
+    is_mail_enabled = get_effective_config_value(CONFIG_MAIL_ENABLED, "MAIL_ENABLED", bool, False)
+    if not is_mail_enabled:
+        app.logger.info(f"Mail system disabled. Skipping notification from {notifier_username} to {lock_holder_username} for {normalized_path}.")
+        return jsonify({"msg": "Email system is currently disabled. Notification not sent."}), 400 # Or maybe 200 with this message? Let's use 400 for clarity.
+
+    # Proceed to send email
+    try:
+        text_body_content = f"Hello {lock_holder_username},\n\nUser '{notifier_username}' has sent a notification regarding your lock on the asset: {normalized_path}"
+        html_body_content = f"<p>Hello {lock_holder_username},</p>" \
+                          f"<p>User <strong>{notifier_username}</strong> has sent a notification regarding your lock on the asset:</p>" \
+                          f"<p><code>{normalized_path}</code></p>"
+
+        # Append optional message if provided
+        if notification_message:
+            text_body_content += f"\n\nMessage from {notifier_username}:\n{notification_message}"
+            html_body_content += f"<p><strong>Message from {notifier_username}:</strong></p><p style=\"white-space: pre-wrap;\">{notification_message}</p>" # Use pre-wrap for formatting
+
+        text_body_content += f"\n\nPlease check the Asset Lock Manager dashboard."
+        html_body_content += f"<p>Please check the Asset Lock Manager dashboard.</p>"
+
+        send_email(
+            subject=f"Asset Lock Notification: {normalized_path}",
+            recipients=[lock_holder_user.email],
+            text_body=text_body_content,
+            html_body=html_body_content
+        )
+        app.logger.info(f"Notification email sent successfully from {notifier_username} to {lock_holder_username} ({lock_holder_user.email}) for asset {normalized_path}.")
+        return jsonify({"msg": "Notification sent successfully."}), 200
+    except Exception as e:
+        app.logger.error(f"Failed to send notification email from {notifier_username} to {lock_holder_username} for {normalized_path}: {e}", exc_info=True)
+        return jsonify({"msg": "Failed to send notification email due to a server error."}), 500
+
+# ----------------------------
+# Public Configuration Status Endpoint
+# ----------------------------
+@app.route("/config/status", methods=["GET", "OPTIONS"])
+@cross_origin(supports_credentials=True)
+@jwt_required() # Requires login, but not admin
+def get_public_config_status():
+    """Retrieve essential public configuration status (e.g., mail enabled)."""
+    try:
+        # Get effective mail enabled status (DB override -> Env Default)
+        # Uses the same logic as the admin endpoint but only retrieves this one value
+        db_mail_enabled = get_db_config_value(CONFIG_MAIL_ENABLED, value_type=bool) 
+        is_mail_enabled = db_mail_enabled if db_mail_enabled is not None else app.config.get("MAIL_ENABLED", False)
+        
+        # Log the determined status for debugging
+        app.logger.debug(f"Public config status check: mail_enabled={is_mail_enabled} (DB: {db_mail_enabled}, App Default: {app.config.get('MAIL_ENABLED')})")
+
+        return jsonify({"mail_enabled": is_mail_enabled}), 200
+    except Exception as e:
+        app.logger.error(f"Error fetching public config status: {e}", exc_info=True)
+        # Return a default state (e.g., mail disabled) to prevent frontend errors?
+        # Or a specific error? Let's return an error for now.
+        return jsonify({"message": "Failed to retrieve configuration status"}), 500
 
 # ----------------------------
 # Admin User Management Endpoints

@@ -3,6 +3,7 @@ import { Outlet, Link as RouterLink, useNavigate } from 'react-router-dom';
 import { Button } from "@/components/ui/button"; // Import shadcn Button
 import { useAuth } from '../context/AuthContext'; // Import useAuth for logout
 import { ShieldCheck } from 'lucide-react'; // Import ShieldCheck icon
+import { Toaster } from '@/components/ui/sonner';
 
 const MainLayout: React.FC = () => {
   const { logout, user } = useAuth();
@@ -50,6 +51,7 @@ const MainLayout: React.FC = () => {
       {/* Main Content Area */}
       <main className="flex-1 container mt-8 mb-8 px-4 max-w-7xl mx-auto">
         <Outlet /> {/* Child routes will render here */}
+        <Toaster />
       </main>
       
       {/* Optional Footer */}

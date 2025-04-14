@@ -1,5 +1,7 @@
 services:
   frontend:
+    # Prefer pre-built image if FRONTEND_IMAGE env var is set, otherwise build locally
+    image: ${FRONTEND_IMAGE:-}
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -10,7 +12,11 @@ services:
       - api # Ensures API is started before frontend tries to proxy requests
 
   api:
-    build: ./server
+    # Prefer pre-built image if API_IMAGE env var is set, otherwise build locally
+    image: ${API_IMAGE:-}
+    build:
+      context: ./server
+      dockerfile: Dockerfile
     container_name: lock_api
     env_file:
       - .env # Load environment variables from .env file

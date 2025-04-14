@@ -1,5 +1,7 @@
 # 🔒 Asset Lock Manager (Open Source Core)
 
+**GitHub Repository:** [https://github.com/GCHOfficial/assetlockmanager/](https://github.com/GCHOfficial/assetlockmanager/)
+
 **Prevents simultaneous edits and merge conflicts for binary assets in Git, especially useful for Unreal Engine projects.**
 
 This repository contains the open-source core components of the Asset Lock Manager system, designed to help teams working with large binary files (like `.uasset` and `.umap` files in Unreal Engine) avoid painful merge conflicts.
@@ -100,6 +102,75 @@ Certain configuration settings can be modified by administrators via the web UI 
 If `MAIL_ENABLED` is `true` in the environment, the system attempts to send a test email to the first admin user on startup. The result (`SUCCESS`, `FAILED`, `SKIPPED`) is visible in the Admin Configuration UI.
 
 See `.env.example` for a full list and descriptions.
+
+--- 
+
+## 🚀 Deployment Options
+
+There are two main ways to run the Asset Lock Manager using Docker Compose:
+
+1.  **Using Pre-built Images (Recommended for Deployment)**
+    *   This method uses pre-built Docker images from GitHub Container Registry (GHCR), avoiding the need to build the images locally.
+    *   The project includes a GitHub Actions workflow (`.github/workflows/docker-publish.yml`) that automatically builds and pushes images to GHCR (`ghcr.io/gchofficial/assetlockmanager/frontend` and `ghcr.io/gchofficial/assetlockmanager/api`) whenever changes are pushed to the `main` branch.
+    *   **Instructions:**
+        1.  **Configure `.env`:** Ensure your `.env` file is configured with database credentials, JWT secret, etc., as described in the Quick Start.
+        2.  **Set Image Variables:** Before running `docker compose up`, you need to tell Docker Compose which images to use by setting environment variables. Use the image names provided above, and select a `:tag` (e.g., `:latest` or a specific commit SHA like `:sha-a1b2c3d`).
+
+            *   **Option A: Export Variables (Linux/macOS/WSL)**
+                ```bash
+                export FRONTEND_IMAGE=ghcr.io/gchofficial/assetlockmanager/frontend:latest
+                export API_IMAGE=ghcr.io/gchofficial/assetlockmanager/api:latest
+                # Or use a specific commit tag:
+                # export FRONTEND_IMAGE=ghcr.io/gchofficial/assetlockmanager/frontend:sha-a1b2c3d
+                # export API_IMAGE=ghcr.io/gchofficial/assetlockmanager/api:sha-a1b2c3d
+                
+                docker compose -f docker-compose.yml up -d 
+                ```
+            *   **Option B: Set Variables (Windows Command Prompt)**
+                ```cmd
+                set FRONTEND_IMAGE=ghcr.io/gchofficial/assetlockmanager/frontend:latest
+                set API_IMAGE=ghcr.io/gchofficial/assetlockmanager/api:latest
+                docker compose -f docker-compose.yml up -d
+                ```
+            *   **Option C: Set Variables (Windows PowerShell)**
+                ```powershell
+                $env:FRONTEND_IMAGE="ghcr.io/gchofficial/assetlockmanager/frontend:latest"
+                $env:API_IMAGE="ghcr.io/gchofficial/assetlockmanager/api:latest"
+                docker compose -f docker-compose.yml up -d
+                ```
+            *   **Option D: Modify `.env` (Not Recommended for Secrets)**
+                You *could* uncomment and set the `FRONTEND_IMAGE` and `API_IMAGE` variables directly in your `.env` file. This is simpler but less flexible.
+
+        3.  **Using with Portainer:**
+            *   Navigate to "Stacks" > "Add stack".
+            *   Give your stack a name.
+            *   Choose "Git Repository" as the build method.
+            *   Enter the repository URL (`https://github.com/GCHOfficial/assetlockmanager/`), reference name (e.g., `refs/heads/main`), and compose path (`docker-compose.yml`).
+            *   Scroll down to "Environment variables".
+            *   Click "Add environment variable" twice.
+            *   Set the `name` to `FRONTEND_IMAGE` and `value` to the full image path (e.g., `ghcr.io/gchofficial/assetlockmanager/frontend:latest`).
+            *   Set the `name` to `API_IMAGE` and `value` to the full image path (e.g., `ghcr.io/gchofficial/assetlockmanager/api:latest`).
+            *   Add any other necessary environment variables from your `.env` file here (like `POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, etc.). **Important:** Do not commit your `.env` file to Git; manage secrets appropriately within Portainer or your deployment environment.
+            *   Click "Deploy the stack". Portainer will pull the specified images and start the services.
+
+        4.  **Using with Podman / `podman-compose`:**
+            *   Ensure you have `podman` and `podman-compose` installed.
+            *   Set the environment variables as shown in Option A, B, or C above.
+            *   Run:
+                ```bash
+                podman-compose -f docker-compose.yml up -d
+                ```
+            *   *(Note: Podman networking and volume handling might differ slightly from Docker. Refer to Podman documentation if you encounter issues.)*
+
+2.  **Local Build (Development / Alternative)**
+    *   This method builds the Docker images for the `frontend` and `api` services locally using the Dockerfiles in their respective directories.
+    *   Use this if you are developing locally or cannot access the pre-built images.
+    *   **Instructions:** Follow the **Quick Start** guide above. Ensure the `FRONTEND_IMAGE` and `API_IMAGE` environment variables are **unset** or empty. Then simply run:
+        ```bash
+        # Ensure you have configured your .env file
+        docker compose build
+        docker compose up -d
+        ```
 
 --- 
 

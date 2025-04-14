@@ -16,13 +16,13 @@ def send_async_email(app, msg):
             # Check if mail is enabled in config before sending
             mail_enabled = current_app.config.get('MAIL_ENABLED', False)
             if not mail_enabled:
-                current_app.logger.info(f"Email sending is disabled (MAIL_ENABLED=False). Suppressing email to {msg.recipients}")
-                return
+                current_app.logger.info(f"Email system disabled by MAIL_ENABLED config. Would send to {msg.recipients}")
+                return False # Indicate email was not sent because system is disabled
             
             # Check MAIL_SUPPRESS_SEND, often used for testing
-            if current_app.config.get('MAIL_SUPPRESS_SEND', False):
-                current_app.logger.info(f"Email sending suppressed by MAIL_SUPPRESS_SEND config. Would send to {msg.recipients}")
-                return
+            # if current_app.config.get('MAIL_SUPPRESS_SEND', False):
+            #     current_app.logger.info(f"Email sending suppressed by MAIL_SUPPRESS_SEND config. Would send to {msg.recipients}")
+            #     return True # Indicate email was handled (suppressed), not an error
 
             # Use the retrieved mail instance
             mail_instance.send(msg)

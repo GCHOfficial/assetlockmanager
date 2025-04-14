@@ -43,6 +43,9 @@ This frontend is designed to be run as part of the main Docker Compose setup in 
     docker compose build
     docker compose up -d
     ```
+
+    > **Note:** To deploy using pre-built Docker images (e.g., from GitHub Container Registry), see the **Deployment Options** section in the main [root README.md](../README.md).
+
 4.  **Access:** Open `http://localhost:8080` in your browser.
 
 --- 

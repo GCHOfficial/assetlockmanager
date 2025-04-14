@@ -310,7 +310,7 @@ def auto_release(backend_url, branch, repo_root):
         print(f"Error auto-releasing locks: {response.json().get('msg', 'Unknown error')}")
         sys.exit(1)
 
-def notify_lock_holder(backend_url, asset_path, repo_root="."):
+def notify_lock_holder(backend_url, asset_path, message=None, repo_root="."):
     """Sends a notification request to the API for the holder of a specific lock."""
     token = load_token(repo_root)
     if not token:
@@ -322,9 +322,14 @@ def notify_lock_holder(backend_url, asset_path, repo_root="."):
     url_path = normalized_path.lstrip('/')
     url = f"{backend_url}/locks/path/{url_path}/notify"
     headers = {"Authorization": f"Bearer {token}"}
+    # Prepare JSON payload, include message only if it's not None
+    payload = {} 
+    if message:
+        payload['message'] = message
     
     try:
-        response = requests.post(url, headers=headers)
+        # Send POST request with payload
+        response = requests.post(url, headers=headers, json=payload if payload else None)
         response.raise_for_status() # Raises HTTPError for 4xx/5xx
         
         # Check for specific success/failure messages from the API
@@ -393,6 +398,7 @@ def main():
     # Notify Lock Holder
     notify_parser = subparsers.add_parser("notify", help="Send a notification to the user holding the lock for an asset.")
     notify_parser.add_argument("asset_path", help="Path to the locked asset relative to repo root.")
+    notify_parser.add_argument("-m", "--message", help="Optional message to include in the notification email.")
 
     args = parser.parse_args()
 
@@ -449,7 +455,7 @@ def main():
     elif args.command == "current-user":
         get_currentuser(backend_url, args.repo_root)
     elif args.command == "notify":
-        notify_lock_holder(backend_url, args.asset_path, args.repo_root)
+        notify_lock_holder(backend_url, args.asset_path, args.message, args.repo_root)
     else:
         # Should not happen due to required=True, but good practice
         parser.print_help()

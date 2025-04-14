@@ -64,7 +64,28 @@ If the `MAIL_ENABLED` environment variable is set to `true`, the `entrypoint.sh`
 
 ## API Endpoints
 
-See OpenAPI documentation (TODO: Add link/generation instructions) for detailed endpoint specifications.
+Key endpoints include:
+*   `/api/login` (POST): Authenticate user, returns JWT.
+*   `/api/currentuser` (GET): Get details of the currently authenticated user.
+*   `/api/locks` (GET): List all active locks.
+*   `/api/locks` (POST): Acquire a new lock (requires `asset_path`, `branch`, optional `comment`).
+*   `/api/locks/<path:asset_path>` (GET): Get details of a specific lock.
+*   `/api/locks/<path:asset_path>` (DELETE): Release a specific lock (user must be owner).
+*   `/api/locks/path/<path:asset_path>/notify` (POST): Send a notification email to the lock holder (optional `message` in JSON body).
+*   `/api/locks/auto-release` (POST): Release all locks for a given `branch` (requires `branch` in JSON body).
+*   `/api/config/status` (GET): Get public configuration status (currently `mail_enabled`). Requires authentication.
+*   `/api/users/me/password` (PUT): User changes their own password.
+*   `/api/users/me/email` (PUT): User requests to change their own email.
+*   `/api/confirm-email/<token>` (GET): Endpoint visited from email link to confirm email change.
+*   `/api/confirm-password/<token>` (GET): Endpoint visited from email link to confirm password change.
+*   `/api/admin/users` (GET, POST): Admin manages users.
+*   `/api/admin/users/<id>` (DELETE): Admin deletes a user.
+*   `/api/admin/users/<id>/password` (PUT): Admin changes a user's password.
+*   `/api/admin/users/<id>/email` (PUT): Admin changes a user's email.
+*   `/api/admin/users/<id>/status` (PUT): Admin changes a user's admin status.
+*   `/api/admin/config` (GET, PUT): Admin manages system configuration overrides.
+
+See OpenAPI documentation (TODO: Add link/generation instructions) or inspect the route definitions in `app.py` and associated Pydantic schemas (`LoginSchema`, `CreateLockSchema`, `NotifyMessageSchema`, `CreateUserSchema`, etc.) for detailed request/response specifications.
 
 ## Background Jobs
 
@@ -99,6 +120,8 @@ This server is designed to be run as part of the main Docker Compose setup in th
     # Build and run only the api and its direct dependencies
     docker compose up -d --build api postgres redis
     ```
+
+    > **Note:** To deploy using pre-built Docker images (e.g., from GitHub Container Registry), see the **Deployment Options** section in the main [root README.md](../README.md).
 
 The API server listens on port 5000 *inside* the Docker container. It is typically accessed via the Nginx proxy running in the `frontend` container (e.g., `http://localhost:8080/api/...`). Direct access from the host is usually not required or configured.
 

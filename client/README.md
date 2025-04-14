@@ -78,7 +78,7 @@ If no URL is found via these methods, the client will display an error message.
 *   `release <path/to/asset.uasset>`
 *   `check <path/to/asset.uasset>` (Checks lock status)
 *   `list` (Lists all current locks)
-*   `notify <path/to/asset.uasset>` (Sends an email notification to the lock holder)
+*   `notify <path/to/asset.uasset> [-m <message>]` (Sends an email notification to the lock holder, optionally including a message)
 *   `auto-release [--branch <branch_name>]` (Releases locks on a specific branch, useful for CI/CD)
 
 Use `python asset_lock_manager.py <command> --help` for details on specific commands.

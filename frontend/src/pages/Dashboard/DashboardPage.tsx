@@ -6,6 +6,19 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Loader2, Terminal, Send } from "lucide-react";
+import { toast } from "sonner";
+import {
+    Dialog,
+    DialogClose,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 
 // Define Lock type mirroring api.ts
 interface Lock {
@@ -17,6 +30,11 @@ interface Lock {
     timestamp: string; // ISO date string
 }
 
+// Define type for public config status
+interface PublicConfigStatus {
+  mail_enabled: boolean;
+}
+
 const DashboardPage: React.FC = () => {
   const { user } = useAuth(); // Get logged-in user details
   const [allLocks, setAllLocks] = useState<Lock[]>([]); // Store all locks
@@ -24,9 +42,14 @@ const DashboardPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [notifyLoading, setNotifyLoading] = useState<{[key: string]: boolean}>({}); // Loading state per lock path
   const [notifyFeedback, setNotifyFeedback] = useState<{ [key: string]: { type: 'success' | 'error', message: string } | null }>({}); // Feedback per lock path
+  const [publicConfigStatus, setPublicConfigStatus] = useState<PublicConfigStatus | null>(null);
+  const [isPublicConfigLoading, setIsPublicConfigLoading] = useState(true);
+  const [notifyDialogOpen, setNotifyDialogOpen] = useState<{[key: string]: boolean}>({}); // State for dialog open status per lock
+  const [notifyMessage, setNotifyMessage] = useState<string>(''); // State for message in the open dialog
 
+  // Fetch Locks
   useEffect(() => {
-    const fetchAllLocks = async () => { // Renamed function
+    const fetchAllLocks = async () => {
       if (!user) return;
       setIsLoading(true);
       setError(null);
@@ -40,8 +63,30 @@ const DashboardPage: React.FC = () => {
         setIsLoading(false);
       }
     };
-
     fetchAllLocks();
+  }, [user]);
+
+  // Fetch Public Config Status (for mail_enabled)
+  useEffect(() => {
+    const fetchPublicConfig = async () => {
+      setIsPublicConfigLoading(true);
+      try {
+        const status = await api.getConfigStatus(); // Use the new API function
+        setPublicConfigStatus(status);
+        console.log("Fetched public config status:", status);
+      } catch (err: any) {
+        console.error("Failed to fetch public config status:", err);
+        toast.error("Error fetching system status", {
+            description: "Could not load email system status. Notify button may be incorrectly enabled."
+        });
+        setPublicConfigStatus(null);
+      } finally {
+        setIsPublicConfigLoading(false);
+      }
+    };
+    if(user) {
+       fetchPublicConfig();
+    }
   }, [user]);
 
   const handleReleaseLock = async (lockId: number, assetPath: string) => {
@@ -62,27 +107,34 @@ const DashboardPage: React.FC = () => {
         console.log(`Next locks after filter (ID: ${lockId}):`, nextLocks.length, nextLocks.map(l => l.id));
         return nextLocks;
       });
-      console.log(`Successfully called API to release lock for ${assetPath}`);
+      toast.success("Lock Released", { description: `Successfully released lock for ${assetPath}.` });
     } catch (err: any) {
       console.error(`Failed to release lock ${lockId} (${assetPath}):`, err);
-      setError(`Failed to release lock for ${assetPath}. You might not have permission or the lock might already be gone.`);
+      toast.error("Error Releasing Lock", { description: err.response?.data?.msg || `Failed to release lock for ${assetPath}.` });
     }
   };
 
   const handleNotifyLockHolder = async (assetPath: string) => {
+    // Message comes from notifyMessage state
+    const messageToSend = notifyMessage.trim() || undefined; // Send undefined if empty/whitespace
+    
     setNotifyLoading(prev => ({ ...prev, [assetPath]: true }));
     setNotifyFeedback(prev => ({ ...prev, [assetPath]: null })); // Clear previous feedback
     
     try {
-      const response = await api.notifyLockHolder(assetPath);
+      // Pass the message to the API call
+      const response = await api.notifyLockHolder(assetPath, messageToSend);
       setNotifyFeedback(prev => ({ ...prev, [assetPath]: { type: 'success', message: response.msg || "Notification sent!" } }));
       // Auto-clear success message after a few seconds
       setTimeout(() => {
          setNotifyFeedback(prev => ({ ...prev, [assetPath]: null }));
-      }, 5000); 
+      }, 5000);
+      setNotifyDialogOpen(prev => ({ ...prev, [assetPath]: false })); // Close dialog on success
+      setNotifyMessage(''); // Clear message input
     } catch (err: any) {
         console.error(`Failed to send notification for ${assetPath}:`, err);
         setNotifyFeedback(prev => ({ ...prev, [assetPath]: { type: 'error', message: err.response?.data?.msg || "Failed to send notification." } }));
+        // Do not close dialog on error, let user see feedback
         // Optional: auto-clear error message too
         setTimeout(() => {
             setNotifyFeedback(prev => ({ ...prev, [assetPath]: null }));
@@ -92,9 +144,22 @@ const DashboardPage: React.FC = () => {
     }
   };
 
+  // Function to handle opening the dialog and resetting state
+  const handleOpenNotifyDialog = (assetPath: string) => {
+    setNotifyMessage(''); // Clear message from previous dialogs
+    setNotifyFeedback(prev => ({ ...prev, [assetPath]: null })); // Clear feedback
+    setNotifyDialogOpen(prev => ({ ...prev, [assetPath]: true }));
+  };
+
   // Filter locks inside the component body before rendering
   const userLocks = allLocks.filter(lock => lock.locked_by === user?.username);
   const otherLocks = allLocks.filter(lock => lock.locked_by !== user?.username);
+  
+  // Determine if mail is enabled from fetched public config status
+  const isMailEnabled = !isPublicConfigLoading && publicConfigStatus?.mail_enabled === true;
+
+  // Determine combined loading state for initial display
+  const isInitiallyLoading = isLoading || isPublicConfigLoading;
 
   if (!user) {
     // Should ideally be handled by ProtectedRoute, but provides fallback
@@ -122,7 +187,7 @@ const DashboardPage: React.FC = () => {
 
       <Separator className="my-6" /> 
 
-      {isLoading && (
+      {isInitiallyLoading && (
         <div className="flex justify-center my-3">
           <Loader2 className="h-8 w-8 animate-spin" />
         </div>
@@ -136,7 +201,7 @@ const DashboardPage: React.FC = () => {
         </Alert>
       )}
 
-      {!isLoading && (
+      {!isInitiallyLoading && (
         <>
           <h2 className="text-2xl font-semibold">
             Your Locked Assets ({userLocks.length})
@@ -181,40 +246,78 @@ const DashboardPage: React.FC = () => {
           ) : (
             <div className="space-y-4">
               {otherLocks.map((lock) => (
-                <Card key={lock.id}>
-                  <CardHeader>
-                    <CardTitle className="text-lg break-all">{lock.asset_path}</CardTitle>
-                    <CardDescription>
-                       Locked by: {lock.locked_by} on branch: {lock.branch} at {new Date(lock.timestamp).toLocaleString()}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                     {lock.comment && (
-                        <p className="text-sm text-muted-foreground">
-                        Comment: {lock.comment}
-                        </p>
-                     )}
-                     <div className="flex items-center space-x-2">
-                        <Button 
-                            size="sm" 
-                            onClick={() => handleNotifyLockHolder(lock.asset_path)}
-                            disabled={notifyLoading[lock.asset_path]}
-                        >
-                            {notifyLoading[lock.asset_path] ? (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 
-                            ) : (
-                                <Send className="mr-2 h-4 w-4" />
-                            )}
-                            {notifyLoading[lock.asset_path] ? 'Sending...' : 'Notify User'}
-                        </Button>
-                        {notifyFeedback[lock.asset_path] && (
-                            <span className={`text-sm ${notifyFeedback[lock.asset_path]?.type === 'error' ? 'text-red-600' : 'text-green-600'}`}>
-                                {notifyFeedback[lock.asset_path]?.message}
-                            </span>
-                        )}
-                     </div>
-                  </CardContent>
-                </Card>
+                <Dialog key={lock.id} open={notifyDialogOpen[lock.asset_path] || false} onOpenChange={(open) => setNotifyDialogOpen(prev => ({ ...prev, [lock.asset_path]: open }))}>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg break-all">{lock.asset_path}</CardTitle>
+                      <CardDescription>
+                        Locked by: {lock.locked_by} on branch: {lock.branch} at {new Date(lock.timestamp).toLocaleString()}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      {lock.comment && (
+                        <p className="text-sm text-muted-foreground">Comment: {lock.comment}</p>
+                      )}
+                      <div className="flex items-center space-x-2">
+                        <DialogTrigger asChild>
+                          <Button
+                            size="sm"
+                            disabled={!isMailEnabled}
+                            title={!isMailEnabled ? "Email system is disabled in configuration." : "Send a notification email to the lock holder"}
+                            onClick={() => handleOpenNotifyDialog(lock.asset_path)} // Prepare dialog state on click
+                          >
+                            <Send className="mr-2 h-4 w-4" />
+                            Notify User
+                          </Button>
+                        </DialogTrigger>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                      <DialogTitle>Notify {lock.locked_by}</DialogTitle>
+                      <DialogDescription>
+                        Send an email notification regarding the lock on <span className="font-medium break-all">{lock.asset_path}</span>. You can add an optional message.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                      <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor={`message-${lock.id}`} className="text-right">
+                          Message
+                        </Label>
+                        <Textarea
+                          id={`message-${lock.id}`}
+                          value={notifyMessage}
+                          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setNotifyMessage(e.target.value)}
+                          placeholder="(Optional) Add a reason for the notification..."
+                          className="col-span-3"
+                          rows={4}
+                        />
+                      </div>
+                      {/* Display feedback inside the dialog */}
+                      {notifyFeedback[lock.asset_path] && (
+                         <div className={`col-span-4 text-sm ${notifyFeedback[lock.asset_path]?.type === 'error' ? 'text-red-600' : 'text-green-600'}`}>
+                             {notifyFeedback[lock.asset_path]?.message}
+                         </div>
+                      )}
+                    </div>
+                    <DialogFooter>
+                      <DialogClose asChild>
+                         <Button type="button" variant="secondary">Cancel</Button>
+                      </DialogClose>
+                      <Button 
+                        type="submit" 
+                        onClick={() => handleNotifyLockHolder(lock.asset_path)}
+                        disabled={notifyLoading[lock.asset_path]}
+                      >
+                        {notifyLoading[lock.asset_path] ? (
+                           <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 
+                        ) : null}
+                        Send Notification
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               ))}
             </div>
           )}
