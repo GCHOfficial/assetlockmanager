@@ -28,8 +28,10 @@ services:
       # RATELIMIT_STORAGE_URI is already set in .env
       # Optional JWT expiration and Initial Admin vars are also loaded from .env if set
     depends_on:
-      - alm-postgres
-      - alm-redis
+      alm-postgres:
+        condition: service_healthy
+      alm-redis:
+        condition: service_started
     volumes:
       # Optional: Mount code for development (comment out for production build)
       # - ./server:/app # Corrected path for server code
